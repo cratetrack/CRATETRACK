@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
+<title>CrateTrack Pro — Mandi Operations</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#F8FAFC;color:#0F172A;-webkit-tap-highlight-color:transparent}
+input,select,textarea,button{font-family:inherit}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ============================================================
+   CRATETRACK PRO — SINGLE FILE APP
+   Super Admin → Mandi Admin → Employees
+   All state in localStorage for persistence across refreshes
+   ============================================================ */
+
+// ─── COLOURS ─────────────────────────────────────────────────
+const C={
+  saffron:"#F97316",saffronD:"#C2410C",dark:"#0F172A",green:"#15803D",
+  greenL:"#DCFCE7",red:"#DC2626",redL:"#FEE2E2",blue:"#1D4ED8",
+  paper:"#F8FAFC",muted:"#64748B",border:"#E2E8F0",card:"#FFFFFF",
+  gold:"#D97706",purple:"#7C3AED",teal:"#0D9488",amber:"#B45309"
+};
+
+// ─── HELPERS ─────────────────────────────────────────────────
+const uid=()=>Math.random().toString(36).slice(2,7).toUpperCase();
+const today=()=>new Date().toISOString().split("T")[0];
+const timeNow=()=>new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+const fmtDate=d=>d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"-";
+const fmtMoney=n=>`₹${Number(n||0).toLocaleString("en-IN")}`;
+const daysAgo=n=>{let d=new Date();d.setDate(d.getDate()-n);return d.toISOString().split("T")[0];}
+
+// ─── PERSISTENT STORE (localStorage) ─────────────────────────
+const STORE_KEY="ct_data_v1";
+function loadStore(){
+  try{
+    const raw=localStorage.getItem(STORE_KEY);
+    if(raw)return JSON.parse(raw);
+  }catch(e){}
+  return null;
+}
+function saveStore(data){
+  try{localStorage.setItem(STORE_KEY,JSON.stringify(data));}catch(e){}
+}
+
+// ─── DEFAULT SEED DATA ────────────────────────────────────────
+function seedData(){
+  const t=today(),d1=daysAgo(1),d3=daysAgo(3),d6=daysAgo(6),d7=daysAgo(7);
+  return {
+    mandis:[
+      {id:"M001",name:"Gudimalkapur Mandi",city:"Hyderabad",state:"Telangana",
+       plan:"Professional",status:"active",owner:"Ramesh Kumar",phone:"9876543210",
+       maxEmp:10,joined:"Jan 2025",adminEmail:"gudimalkapur@cratetrack.in",adminPw:"Mandi@001"},
+      {id:"M002",name:"APMC Kothapet",city:"Hyderabad",state:"Telangana",
+       plan:"Professional",status:"active",owner:"Saleem Ahmed",phone:"9845012345",
+       maxEmp:8,joined:"Feb 2025",adminEmail:"kothapet@cratetrack.in",adminPw:"Mandi@002"},
+    ],
+    // per-mandi data keyed by mandiId
+    mandiData:{
+      "M001":{
+        people:[
+          {id:"F001",name:"Ramu Patel",phone:"9876543210",address:"Kothur Village",type:"farmer",active:true},
+          {id:"F002",name:"Suresh Reddy",phone:"9845012345",address:"Shadnagar",type:"farmer",active:true},
+          {id:"B001",name:"Mohammed Salim",phone:"9123456780",address:"Begum Bazaar",type:"buyer",active:true},
+          {id:"T001",name:"Ravi Transport",phone:"9000000099",address:"NH44",type:"transporter",active:true,ratePerCrate:10},
+        ],
+        employees:[
+          {id:"E001",name:"Ravi Kumar",phone:"9000000001",role:"writer",pin:"1111",active:true},
+          {id:"E002",name:"Sita Devi",phone:"9000000002",role:"boxkeeper",pin:"2222",active:true},
+        ],
+        vehicles:[
+          {id:"V001",vehicleNo:"TS09EA1234",date:t,time:"06:15",totalIn:200,
+           status:"segregated",outDone:false,transporterId:"T001",transporterName:"Ravi Transport",
+           ratePerCrate:10,lots:[
+             {lotNo:1,personId:"F001",personName:"Ramu Patel",personType:"farmer",qty:80,isOther:false},
+             {lotNo:2,personId:"B001",personName:"Mohammed Salim",personType:"buyer",qty:80,isOther:false},
+             {lotNo:3,personId:"F002",personName:"Suresh Reddy",personType:"farmer",qty:40,isOther:false},
+           ]},
+        ],
+        txns:[
+          {id:"T001",vehicleNo:"TS09EA1234",dir:"IN",personId:"F001",personName:"Ramu Patel",personType:"farmer",qty:80,date:t,time:"06:20",lotNo:1,isOther:false,note:""},
+          {id:"T002",vehicleNo:"TS09EA1234",dir:"IN",personId:"B001",personName:"Mohammed Salim",personType:"buyer",qty:80,date:t,time:"06:20",lotNo:2,isOther:false,note:""},
+          {id:"T003",vehicleNo:"TS09EA1234",dir:"IN",personId:"F002",personName:"Suresh Reddy",personType:"farmer",qty:40,date:t,time:"06:20",lotNo:3,isOther:false,note:""},
+          {id:"H001",vehicleNo:"TS01AA0001",dir:"OUT",personId:"F001",personName:"Ramu Patel",personType:"farmer",qty:120,date:d7,time:"07:00",lotNo:1,isOther:false,note:""},
+          {id:"H002",vehicleNo:"TS01AA0001",dir:"OUT",personId:"B001",personName:"Mohammed Salim",personType:"buyer",qty:100,date:d6,time:"08:00",lotNo:1,isOther:false,note:""},
+          {id:"H003",vehicleNo:"TS01AA0003",dir:"IN",personId:"F001",personName:"Ramu Patel",personType:"farmer",qty:20,date:d3,time:"06:30",lotNo:1,isOther:false,note:"return"},
+        ]
+      },
+      "M002":{
+        people:[
+          {id:"F010",name:"Krishna Babu",phone:"9988776600",address:"LB Nagar",type:"farmer",active:true},
+          {id:"B010",name:"Anil Sharma",phone:"9234567890",address:"Kothapet",type:"buyer",active:true},
+        ],
+        employees:[
+          {id:"E010",name:"Venkat Rao",phone:"9001000001",role:"writer",pin:"3333",active:true},
+        ],
+        vehicles:[],
+        txns:[]
+      }
+    }
+  };
+}
+
+// ─── STATE ────────────────────────────────────────────────────
+let DB = loadStore() || seedData();
+function persist(){ saveStore(DB); }
+
+// Super admin creds are hardcoded (not stored in DB)
+const SA={email:"superadmin@cratetrack.in",pw:"CT@Super2025!"};
+
+// ─── SIMPLE RENDER ENGINE ─────────────────────────────────────
+let currentSession=null; // {role, mandiId} or null
+let currentView="login";
+let viewStack=[]; // for back navigation
+
+function render(){
+  const app=document.getElementById("app");
+  app.innerHTML="";
+  if(!currentSession){
+    app.appendChild(buildLogin());
+  } else if(currentSession.role==="superadmin"){
+    app.appendChild(buildSuperAdmin());
+  } else if(currentSession.role==="mandiadmin"){
+    app.appendChild(buildMandiAdmin(currentSession.mandiId));
+  }
+}
+
+// ─── TOAST ───────────────────────────────────────────────────
+let toastTimer=null;
+function showToast(msg,type="ok"){
+  let t=document.getElementById("toast");
+  if(!t){t=document.createElement("div");t.id="toast";document.body.appendChild(t);}
+  t.textContent=(type==="err"?"⚠️ ":"✅ ")+msg;
+  t.style.cssText=`position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+    background:${type==="err"?C.red:C.green};color:#fff;padding:10px 20px;
+    border-radius:10px;font-weight:700;font-size:13px;z-index:9999;
+    box-shadow:0 4px 20px rgba(0,0,0,.3);white-space:nowrap;`;
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{if(t.parentNode)t.parentNode.removeChild(t);},3000);
+}
+
+// ─── DOM HELPERS ──────────────────────────────────────────────
+function el(tag,props={},children=[]){
+  const e=document.createElement(tag);
+  Object.entries(props).forEach(([k,v])=>{
+    if(k==="style"&&typeof v==="object")Object.assign(e.style,v);
+    else if(k==="cls")e.className=v;
+    else if(k.startsWith("on"))e.addEventListener(k.slice(2).toLowerCase(),v);
+    else e[k]=v;
+  });
+  children.forEach(c=>{
+    if(c===null||c===undefined)return;
+    if(typeof c==="string"||typeof c==="number")e.appendChild(document.createTextNode(c));
+    else e.appendChild(c);
+  });
+  return e;
+}
+function div(style={},children=[]){return el("div",{style},children);}
+function btn(label,onClick,style={}){
+  return el("button",{onclick:onClick,style:{
+    background:C.saffron,color:"#fff",border:"none",borderRadius:8,
+    padding:"9px 16px",fontWeight:700,fontSize:13,cursor:"pointer",...style
+  }},[label]);
+}
+function ghostBtn(label,onClick,color=C.muted){
+  return btn(label,onClick,{background:"transparent",color,border:`2px solid ${color}`,padding:"7px 14px"});
+}
+function inp(placeholder,value,onInput,type="text",style={}){
+  const i=el("input",{type,value:value||"",placeholder,style:{
+    width:"100%",background:C.paper,border:`1.5px solid ${C.border}`,
+    borderRadius:7,padding:"9px 12px",fontSize:13,outline:"none",boxSizing:"border-box",...style
+  }});
+  i.oninput=e=>onInput(e.target.value);
+  return i;
+}
+function sel(value,options,onChange,style={}){
+  const s=el("select",{style:{width:"100%",background:C.paper,border:`1.5px solid ${C.border}`,
+    borderRadius:7,padding:"9px 10px",fontSize:13,outline:"none",boxSizing:"border-box",...style}});
+  options.forEach(([v,l])=>{
+    const o=el("option",{value:v},[l]);
+    if(v===value)o.selected=true;
+    s.appendChild(o);
+  });
+  s.onchange=e=>onChange(e.target.value);
+  return s;
+}
+function field(label,inputEl,note=""){
+  return div({marginBottom:10},[
+    label?el("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:"0.06em"}},[label]):null,
+    inputEl,
+    note?el("div",{style:{fontSize:10,color:C.muted,marginTop:3}},[note]):null
+  ]);
+}
+function card(children=[],style={}){
+  return div({background:C.card,border:`1px solid ${C.border}`,borderRadius:12,
+    padding:16,marginBottom:12,...style},children);
+}
+function badge(label,color=C.green){
+  return el("span",{style:{background:color+"22",color,borderRadius:20,
+    padding:"2px 9px",fontSize:10,fontWeight:700,display:"inline-block",whiteSpace:"nowrap"}},[label]);
+}
+function modal(title,content,onClose,wide=false){
+  const overlay=div({position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+    zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:12},[
+    div({background:C.card,borderRadius:16,width:"100%",maxWidth:wide?720:460,
+      maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,.35)"},[
+      div({display:"flex",justifyContent:"space-between",alignItems:"center",
+        padding:"14px 18px",borderBottom:`1px solid ${C.border}`,
+        position:"sticky",top:0,background:C.card,zIndex:1},[
+        el("div",{style:{fontWeight:800,fontSize:15}},[title]),
+        btn("×",()=>{overlay.remove();if(onClose)onClose();},{background:"none",color:C.muted,border:"none",fontSize:24,padding:"0 4px",cursor:"pointer"})
+      ]),
+      div({padding:18},[content])
+    ])
+  ]);
+  document.body.appendChild(overlay);
+  return overlay;
+}
+function copyToClipboard(text){
+  try{navigator.clipboard.writeText(text);}catch(e){
+    const t=document.createElement("textarea");t.value=text;
+    document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();
+  }
+  showToast("Copied!");
+}
+
+// ─── BALANCE CALC ─────────────────────────────────────────────
+function getBalance(txns,personId){
+  const mine=txns.filter(t=>t.personId===personId);
+  const out=mine.filter(t=>t.dir==="OUT").reduce((s,t)=>s+t.qty,0);
+  const inp=mine.filter(t=>t.dir==="IN").reduce((s,t)=>s+t.qty,0);
+  return {totalOut:out,totalIn:inp,balance:Math.max(0,out-inp)};
+}
+
+// ─── WHATSAPP / SMS ───────────────────────────────────────────
+function sendWA(person,vehicleNo,cratesIn,cratesOut,balance,mandiName){
+  if(!person?.phone)return;
+  const msg=`📦 *${mandiName}* నుండి సందేశం\n\nప్రియమైన *${person.name}* గారికి,\n\nవాహనం: *${vehicleNo||"—"}*\n📥 వచ్చిన క్రేట్లు: *${cratesIn}*\n📤 వెళ్ళిన క్రేట్లు: *${cratesOut}*\n⚖️ మీ దగ్గర మొత్తం బాకీ: *${balance} క్రేట్లు*\n\nదయచేసి వీలైనంత త్వరగా తిరిగి ఇవ్వగలరు.\n📞 మండీ కార్యాలయం సంప్రదించండి.\n_CrateTrack_`;
+  window.open(`https://wa.me/91${person.phone}?text=${encodeURIComponent(msg)}`,"_blank");
+}
+
+// ─══════════════════════════════════════════════════════════════
+//  LOGIN PAGE
+// ════════════════════════════════════════════════════════════════
+function buildLogin(){
+  let email="",pw="";
+  const errDiv=div({background:C.redL,border:`1px solid ${C.red}`,borderRadius:8,
+    padding:"8px 12px",fontSize:12,color:C.red,fontWeight:600,marginBottom:10,display:"none"},["⚠️ Invalid credentials. Contact your administrator."]);
+
+  const doLogin=()=>{
+    const em=email.trim().toLowerCase();
+    if(em===SA.email&&pw===SA.pw){
+      currentSession={role:"superadmin"};render();return;
+    }
+    // check mandi admins
+    const mandi=DB.mandis.find(m=>
+      m.adminEmail&&m.adminEmail.toLowerCase()===em&&m.adminPw===pw
+    );
+    if(mandi){
+      if(mandi.status==="suspended"){
+        errDiv.textContent="⚠️ This account is suspended. Contact Super Admin.";
+        errDiv.style.display="block";return;
+      }
+      currentSession={role:"mandiadmin",mandiId:mandi.id,mandiName:mandi.name,maxEmp:mandi.maxEmp};
+      render();return;
+    }
+    errDiv.textContent="⚠️ Invalid credentials. Contact your administrator.";
+    errDiv.style.display="block";
+  };
+
+  const emailInp=inp("your@email.com","",v=>{email=v;errDiv.style.display="none"});
+  const pwInp=inp("••••••••","",v=>{pw=v;errDiv.style.display="none"},"password");
+  pwInp.onkeydown=e=>{if(e.key==="Enter")doLogin();};
+
+  return div({minHeight:"100vh",background:`linear-gradient(135deg,${C.dark},#1a0800 50%,#001a08)`,
+    display:"flex",alignItems:"center",justifyContent:"center",padding:16},[
+    div({width:"100%",maxWidth:400},[
+      div({textAlign:"center",marginBottom:28},[
+        div({background:C.saffron,width:70,height:70,borderRadius:18,display:"flex",
+          alignItems:"center",justifyContent:"center",margin:"0 auto 14px",fontSize:36},["📦"]),
+        el("div",{style:{fontWeight:900,fontSize:28,color:"#fff"}}),
+        el("div",{style:{fontWeight:900,fontSize:28,color:"#fff"}},["CrateTrack Pro"]),
+        el("div",{style:{color:"#64748B",fontSize:13,marginTop:6}},["Mandi Crate Management Platform"]),
+      ]),
+      card([
+        el("div",{style:{fontWeight:700,fontSize:16,marginBottom:16}},["Sign In"]),
+        field("EMAIL ADDRESS",emailInp),
+        field("PASSWORD",pwInp),
+        errDiv,
+        btn("Sign In →",doLogin,{width:"100%",padding:"11px",fontSize:14}),
+        el("div",{style:{textAlign:"center",marginTop:12,fontSize:11,color:C.muted}},
+          ["Contact your administrator if you need access."])
+      ])
+    ])
+  ]);
+}
+
+// ─══════════════════════════════════════════════════════════════
+//  SUPER ADMIN
+// ════════════════════════════════════════════════════════════════
+let saTab="overview";
+
+function buildSuperAdmin(){
+  const plans={Starter:999,Professional:2499,Enterprise:5999};
+  const mandis=DB.mandis;
+  const mrr=mandis.filter(m=>m.status!=="suspended").reduce((s,m)=>s+(plans[m.plan]||0),0);
+
+  const wrap=div({minHeight:"100vh",background:C.paper});
+
+  // HEADER
+  wrap.appendChild(div({background:C.dark,padding:"12px 20px",display:"flex",
+    alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10},[
+    div({display:"flex",alignItems:"center",gap:12},[
+      div({background:C.saffron,width:38,height:38,borderRadius:9,display:"flex",
+        alignItems:"center",justifyContent:"center",fontSize:20},["📦"]),
+      div({},[
+        el("div",{style:{fontWeight:800,color:"#fff",fontSize:15}},["CrateTrack — SUPER ADMIN"]),
+        el("div",{style:{color:"#64748B",fontSize:10}},["Platform Control Center"])
+      ])
+    ]),
+    div({display:"flex",alignItems:"center",gap:16},[
+      div({textAlign:"right"},[
+        el("div",{style:{color:C.gold,fontWeight:900,fontSize:18}},[fmtMoney(mrr)+"/mo"]),
+        el("div",{style:{color:"#64748B",fontSize:10}},["MRR · ARR "+fmtMoney(mrr*12)])
+      ]),
+      btn("Sign Out",()=>{currentSession=null;saTab="overview";render();},
+        {background:"transparent",border:"1px solid #334155",color:"#94A3B8",padding:"6px 14px",fontSize:12})
+    ])
+  ]));
+
+  // TABS
+  const tabs=[["overview","📊 Overview"],["mandis","🏪 Mandis & Credentials"],["revenue","💰 Revenue"]];
+  const tabBar=div({background:C.card,borderBottom:`1px solid ${C.border}`,
+    display:"flex",padding:"0 20px",overflowX:"auto"});
+  const body=div({padding:20,maxWidth:1100,margin:"0 auto"});
+
+  function setTab(k){
+    saTab=k;
+    tabBar.querySelectorAll("button").forEach(b=>{
+      const active=b.dataset.tab===k;
+      b.style.color=active?C.saffron:C.muted;
+      b.style.borderBottom=active?`2px solid ${C.saffron}`:"2px solid transparent";
+    });
+    renderTabBody();
+  }
+
+  tabs.forEach(([k,lbl])=>{
+    const b=el("button",{"data-tab":k,onclick:()=>setTab(k),style:{
+      padding:"11px 14px",border:"none",background:"none",cursor:"pointer",
+      fontWeight:700,fontSize:12,borderBottom:"2px solid transparent",
+      marginBottom:-1,whiteSpace:"nowrap",
+      color:saTab===k?C.saffron:C.muted,
+      borderBottomColor:saTab===k?C.saffron:"transparent"
+    }},[lbl]);
+    tabBar.appendChild(b);
+  });
+  wrap.appendChild(tabBar);
+  wrap.appendChild(body);
+
+  function renderTabBody(){
+    body.innerHTML="";
+    if(saTab==="overview") renderOverview();
+    else if(saTab==="mandis") renderMandis();
+    else if(saTab==="revenue") renderRevenue();
+  }
+
+  // ── OVERVIEW ──
+  function renderOverview(){
+    const active=mandis.filter(m=>m.status==="active").length;
+    const trial=mandis.filter(m=>m.status==="trial").length;
+    const suspended=mandis.filter(m=>m.status==="suspended").length;
+    const stats=[
+      ["Total Mandis",mandis.length,"🏪",C.blue],
+      ["Active",active,"✅",C.green],
+      ["Trial",trial,"🔄",C.gold],
+      ["Suspended",suspended,"⏸",C.muted],
+      ["MRR",fmtMoney(mrr),"💰",C.green],
+      ["ARR",fmtMoney(mrr*12),"📈",C.saffronD],
+    ];
+    const grid=div({display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",
+      gap:12,marginBottom:20});
+    stats.forEach(([label,val,icon,col])=>{
+      grid.appendChild(card([
+        el("div",{style:{fontSize:22,marginBottom:4}},[icon]),
+        el("div",{style:{fontWeight:800,fontSize:22,color:col}},[String(val)]),
+        el("div",{style:{color:C.muted,fontSize:11,marginTop:2}},[label])
+      ],{marginBottom:0}));
+    });
+    body.appendChild(grid);
+
+    const listCard=card([
+      el("div",{style:{fontWeight:700,fontSize:14,marginBottom:14}},["All Mandis — Quick Access"])
+    ]);
+    mandis.forEach(m=>{
+      const row=div({display:"flex",alignItems:"center",gap:10,padding:"10px 0",
+        borderTop:`1px solid ${C.border}`,flexWrap:"wrap"},[
+        div({flex:1},[
+          el("div",{style:{fontWeight:700,fontSize:13}},[m.name]),
+          el("div",{style:{fontSize:11,color:C.muted}},[`${m.city}, ${m.state} · ${m.owner} · Max ${m.maxEmp} emp`])
+        ]),
+        badge(m.plan,m.plan==="Enterprise"?C.blue:m.plan==="Professional"?C.saffron:C.green),
+        badge(m.status==="active"?"● Active":m.status==="trial"?"◉ Trial":"⏸ Suspended",
+          m.status==="active"?C.green:m.status==="trial"?C.gold:C.muted),
+        btn("🔑 Credentials",()=>showCredModal(m),{background:C.purple,fontSize:12,padding:"6px 12px"}),
+        btn("Open →",()=>openMandiAsAdmin(m),{fontSize:12,padding:"6px 12px"})
+      ]);
+      listCard.appendChild(row);
+    });
+    body.appendChild(listCard);
+  }
+
+  // ── MANDIS ──
+  let mandiFormMode=null; // null | "create" | "edit"
+  let editingMandi=null;
+  let mf={name:"",city:"",state:"Telangana",plan:"Professional",status:"active",
+           owner:"",phone:"",maxEmp:"10",joined:"",adminEmail:"",adminPw:""};
+
+  function renderMandis(){
+    body.innerHTML="";
+    const hdr=div({display:"flex",justifyContent:"space-between",alignItems:"center",
+      marginBottom:16,flexWrap:"wrap",gap:8},[
+      div({},[
+        el("div",{style:{fontWeight:800,fontSize:18}},["Mandi Management"]),
+        el("div",{style:{fontSize:12,color:C.muted}},["Create mandis · set admin credentials · control employee limits"])
+      ]),
+      btn("＋ Create New Mandi",()=>{
+        mandiFormMode="create";editingMandi=null;
+        mf={name:"",city:"",state:"Telangana",plan:"Professional",status:"active",
+            owner:"",phone:"",maxEmp:"10",
+            joined:new Date().toLocaleDateString("en-IN",{month:"short",year:"numeric"}),
+            adminEmail:"",adminPw:""};
+        renderMandis();
+      },{background:C.green})
+    ]);
+    body.appendChild(hdr);
+
+    if(mandiFormMode){
+      body.appendChild(buildMandiForm());
+    }
+
+    mandis.forEach(m=>body.appendChild(buildMandiCard(m)));
+  }
+
+  function buildMandiForm(){
+    const isEdit=mandiFormMode==="edit";
+    const wrap=div({background:C.paper,border:`2px solid ${C.saffron}`,borderRadius:12,
+      padding:20,marginBottom:16});
+
+    wrap.appendChild(el("div",{style:{fontWeight:800,fontSize:15,marginBottom:16,color:C.saffron}},
+      [isEdit?"✏️ Edit Mandi":"＋ Create New Mandi"]));
+
+    const grid=div({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10});
+    const fields=[
+      ["MANDI NAME *","name","text","e.g. Gudimalkapur Mandi"],
+      ["OWNER / CONTACT NAME *","owner","text","Full name"],
+      ["CITY","city","text","Hyderabad"],
+      ["STATE","state","text","Telangana"],
+      ["OWNER PHONE","phone","text","9876543210"],
+      ["MAX EMPLOYEES (you control this)","maxEmp","number","10"],
+    ];
+    const inputs={};
+    fields.forEach(([lbl,key,type,ph])=>{
+      const i=inp(ph,mf[key],v=>{mf[key]=v;},type);
+      inputs[key]=i;
+      grid.appendChild(field(lbl,i));
+    });
+
+    const planSel=sel(mf.plan,
+      [["Starter","Starter — ₹999/mo"],["Professional","Professional — ₹2,499/mo"],["Enterprise","Enterprise — ₹5,999/mo"]],
+      v=>mf.plan=v);
+    const statusSel=sel(mf.status,
+      [["active","Active"],["trial","Trial (free period)"],["suspended","Suspended"]],
+      v=>mf.status=v);
+    grid.appendChild(field("PLAN",planSel));
+    grid.appendChild(field("STATUS",statusSel));
+    wrap.appendChild(grid);
+
+    // Credentials section
+    wrap.appendChild(div({background:"#0F172A",borderRadius:10,padding:14,margin:"12px 0"},[
+      el("div",{style:{color:"#94A3B8",fontSize:11,fontWeight:700,letterSpacing:"0.07em",marginBottom:10}},
+        ["🔑 MANDI ADMIN LOGIN CREDENTIALS"]),
+      el("div",{style:{background:"#FFF7ED",border:`1px solid ${C.saffron}`,borderRadius:7,
+        padding:"8px 12px",fontSize:11,color:C.saffronD,marginBottom:12}},
+        ["⚠️ You set these credentials. The Mandi Admin will use them to log in. Share securely."]),
+      div({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10},[
+        field("ADMIN LOGIN EMAIL *",inp("admin@example.com",mf.adminEmail,v=>mf.adminEmail=v,"email",
+          {background:"#1E293B",border:"1px solid #334155",color:"#F8FAFC",padding:"10px 12px"})),
+        field("ADMIN PASSWORD *",inp("Min 6 characters",mf.adminPw,v=>mf.adminPw=v,"text",
+          {background:"#1E293B",border:"1px solid #334155",color:"#F8FAFC",padding:"10px 12px",fontFamily:"monospace"})),
+      ])
+    ]));
+
+    const saveFn=()=>{
+      if(!mf.name.trim()||!mf.owner.trim()){showToast("Name & Owner required","err");return;}
+      if(!mf.adminEmail.trim()||!mf.adminPw.trim()){showToast("Admin email & password required","err");return;}
+      if(mf.adminPw.length<6){showToast("Password must be at least 6 characters","err");return;}
+      const emailLc=mf.adminEmail.trim().toLowerCase();
+      // check duplicate email (skip self when editing)
+      const dup=DB.mandis.find(m=>m.adminEmail&&m.adminEmail.toLowerCase()===emailLc&&(!isEdit||m.id!==editingMandi.id));
+      if(dup){showToast("Email already used by another mandi","err");return;}
+
+      if(isEdit){
+        DB.mandis=DB.mandis.map(m=>m.id===editingMandi.id?{...m,...mf,adminEmail:emailLc,maxEmp:parseInt(mf.maxEmp)||1}:m);
+        showToast("Mandi updated & credentials saved!");
+      } else {
+        const id="M"+uid();
+        const newM={...mf,id,adminEmail:emailLc,maxEmp:parseInt(mf.maxEmp)||1};
+        DB.mandis.push(newM);
+        // init empty data for new mandi
+        DB.mandiData[id]={people:[],employees:[],vehicles:[],txns:[]};
+        persist();
+        mandiFormMode=null;editingMandi=null;
+        renderMandis();
+        showCredModal(newM);
+        showToast("Mandi created! Share credentials.");
+        return;
+      }
+      persist();
+      mandiFormMode=null;editingMandi=null;
+      renderMandis();
+    };
+
+    wrap.appendChild(div({display:"flex",gap:10,marginTop:4},[
+      btn(isEdit?"Save Changes":"Create Mandi & Set Credentials",saveFn),
+      ghostBtn("Cancel",()=>{mandiFormMode=null;editingMandi=null;renderMandis();})
+    ]));
+    return wrap;
+  }
+
+  function buildMandiCard(m){
+    const rev=plans[m.plan]||0;
+    const suspended=m.status==="suspended";
+    const c=card([],{opacity:suspended?.75:1,border:`1px solid ${suspended?"#FEE2E2":C.border}`});
+
+    c.appendChild(div({display:"flex",justifyContent:"space-between",
+      alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:12},[
+      div({flex:1},[
+        div({display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4},[
+          el("div",{style:{fontWeight:800,fontSize:16}},[m.name]),
+          badge(m.plan,m.plan==="Enterprise"?C.blue:m.plan==="Professional"?C.saffron:C.green),
+          badge(m.status==="active"?"● Active":m.status==="trial"?"◉ Trial":"⏸ Suspended",
+            m.status==="active"?C.green:m.status==="trial"?C.gold:C.red),
+        ]),
+        el("div",{style:{color:C.muted,fontSize:12}},[`${m.city}, ${m.state} · ${m.owner} · ${m.phone} · Joined: ${m.joined}`])
+      ]),
+      div({display:"flex",gap:6,flexWrap:"wrap"},[
+        btn("Open Dashboard →",()=>openMandiAsAdmin(m),{fontSize:12,padding:"7px 12px"}),
+        btn("🔑 Credentials",()=>showCredModal(m),{background:C.purple,fontSize:12,padding:"7px 12px"}),
+        ghostBtn("✏️ Edit",()=>{
+          mandiFormMode="edit";editingMandi=m;
+          mf={...m,maxEmp:String(m.maxEmp||10)};
+          renderMandis();window.scrollTo(0,0);
+        },C.blue),
+        ghostBtn(suspended?"Activate":"Suspend",()=>{
+          DB.mandis=DB.mandis.map(x=>x.id===m.id?{...x,status:suspended?"active":"suspended"}:x);
+          persist();renderMandis();
+          showToast(suspended?"Mandi activated!":"Mandi suspended.");
+        },suspended?C.green:C.red),
+      ])
+    ]));
+
+    const infoGrid=div({display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:8});
+    [["Owner",m.owner],["Phone",m.phone],["Max Employees",m.maxEmp+" emp"],
+     ["Revenue",fmtMoney(rev)+"/mo"],["Admin Email",m.adminEmail||"—"],["Mandi ID",m.id]].forEach(([k,v])=>{
+      infoGrid.appendChild(div({background:C.paper,borderRadius:8,padding:"8px 10px"},[
+        el("div",{style:{fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.05em"}},[k]),
+        el("div",{style:{fontWeight:700,fontSize:11,marginTop:2,wordBreak:"break-all"}},[String(v)])
+      ]));
+    });
+    c.appendChild(infoGrid);
+    return c;
+  }
+
+  // ── REVENUE ──
+  function renderRevenue(){
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,marginBottom:16}},["Revenue Overview"]));
+    const sumGrid=div({display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20});
+    const avgRev=mandis.length?Math.round(mrr/mandis.length):0;
+    [["Monthly MRR",fmtMoney(mrr),C.green],["Annual ARR",fmtMoney(mrr*12),C.saffron],
+     ["Avg Per Mandi",fmtMoney(avgRev)+"/mo",C.blue]].forEach(([lbl,val,col])=>{
+      sumGrid.appendChild(card([
+        el("div",{style:{color:C.muted,fontSize:12,marginBottom:6}},[lbl]),
+        el("div",{style:{fontWeight:800,fontSize:26,color:col}},[val])
+      ],{marginBottom:0}));
+    });
+    body.appendChild(sumGrid);
+
+    const listCard=card([el("div",{style:{fontWeight:700,fontSize:14,marginBottom:14}},["Revenue by Mandi"])]);
+    mandis.forEach(m=>{
+      const rev=plans[m.plan]||0;
+      const pct=Math.round(rev/5999*100);
+      listCard.appendChild(div({display:"flex",alignItems:"center",gap:12,
+        padding:"9px 0",borderTop:`1px solid ${C.border}`,flexWrap:"wrap"},[
+        div({flex:1},[
+          el("div",{style:{fontWeight:600,fontSize:13}},[m.name]),
+          el("div",{style:{color:C.muted,fontSize:11}},[`${m.plan} · ${m.city}`])
+        ]),
+        div({background:C.paper,borderRadius:4,height:6,width:160,flexShrink:0},[
+          div({background:C.saffron,height:6,borderRadius:4,width:pct+"%"})
+        ]),
+        el("div",{style:{fontWeight:800,color:C.saffron,minWidth:80,textAlign:"right"}},
+          [fmtMoney(rev)+"/mo"])
+      ]));
+    });
+    listCard.appendChild(div({display:"flex",justifyContent:"flex-end",
+      marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`},[
+      el("div",{style:{fontWeight:800,fontSize:15}},["Total: ",
+        el("span",{style:{color:C.green}},[fmtMoney(mrr)+"/mo"])])
+    ]));
+    body.appendChild(listCard);
+  }
+
+  // ── CREDENTIAL MODAL ──
+  function showCredModal(m){
+    const content=div({},[
+      div({background:"#0F172A",borderRadius:10,padding:16,marginBottom:14},[
+        el("div",{style:{color:"#94A3B8",fontSize:11,fontWeight:700,letterSpacing:"0.07em",marginBottom:12}},
+          ["MANDI ADMIN LOGIN CREDENTIALS"]),
+        ...[
+          ["MANDI NAME",m.name,"#F8FAFC"],
+          ["LOGIN EMAIL",m.adminEmail||"—","#86EFAC"],
+          ["PASSWORD",m.adminPw||"—","#FCD34D"],
+          ["MAX EMPLOYEES",String(m.maxEmp),"#C4B5FD"],
+          ["PLAN",m.plan,m.plan==="Enterprise"?"#60A5FA":m.plan==="Professional"?"#FB923C":"#4ADE80"],
+          ["STATUS",m.status,"#94A3B8"],
+        ].map(([lbl,val,col])=>div({background:"#1E293B",borderRadius:8,padding:"8px 12px",marginBottom:6,
+          display:"flex",justifyContent:"space-between",alignItems:"center"},[
+          div({},[
+            el("div",{style:{fontSize:9,color:"#94A3B8",fontWeight:700,letterSpacing:"0.07em",marginBottom:2}},[lbl]),
+            el("div",{style:{fontFamily:"monospace",fontWeight:700,fontSize:13,color:col,wordBreak:"break-all"}},[val])
+          ]),
+          btn("COPY",()=>copyToClipboard(val),{background:"#334155",border:"none",
+            padding:"4px 8px",fontSize:10,color:"#94A3B8"})
+        ]))
+      ]),
+      div({background:"#FFF7ED",border:`1px solid ${C.saffron}`,borderRadius:8,
+        padding:"10px 14px",fontSize:12,color:C.saffronD,marginBottom:12},[
+        el("b",{},["How to share:"]),
+        el("br",{}),
+        "1. Click COPY or screenshot these credentials",el("br",{}),
+        `2. WhatsApp to ${m.owner} (${m.phone})`,el("br",{}),
+        `3. They log in → can add up to ${m.maxEmp} employees`
+      ]),
+      div({display:"flex",gap:8},[
+        btn("📱 Send via WhatsApp",()=>{
+          const msg=`*CrateTrack — Mandi Login Credentials*\n\nMandi: *${m.name}*\nEmail: *${m.adminEmail}*\nPassword: *${m.adminPw}*\nPlan: *${m.plan}* (Max ${m.maxEmp} employees)\n\nLogin at the CrateTrack app.\n_Powered by CrateTrack_`;
+          window.open(`https://wa.me/91${m.phone}?text=${encodeURIComponent(msg)}`,"_blank");
+        },{background:"#25D366",flex:1}),
+        ghostBtn("✏️ Edit",()=>{
+          document.querySelector("[id^=modal-overlay]")?.remove();
+          const allOverlays=document.querySelectorAll("[style*='position:fixed']");
+          allOverlays.forEach(o=>{if(o.id!=="toast")o.remove();});
+          mandiFormMode="edit";editingMandi=m;
+          mf={...m,maxEmp:String(m.maxEmp||10)};
+          saTab="mandis";setTab("mandis");window.scrollTo(0,0);
+        },C.blue),
+      ])
+    ]);
+    modal(`🔑 Credentials — ${m.name}`,content,null,true);
+  }
+
+  function openMandiAsAdmin(m){
+    currentSession={role:"mandiadmin",mandiId:m.id,mandiName:m.name,
+      maxEmp:m.maxEmp,fromSuperAdmin:true};
+    render();
+  }
+
+  renderTabBody();
+  return wrap;
+}
+
+// ─══════════════════════════════════════════════════════════════
+//  MANDI ADMIN DASHBOARD
+// ════════════════════════════════════════════════════════════════
+let maTab="writer";
+
+function buildMandiAdmin(mandiId){
+  if(!DB.mandiData[mandiId]) DB.mandiData[mandiId]={people:[],employees:[],vehicles:[],txns:[]};
+  const MD=DB.mandiData[mandiId];
+  const mandi=DB.mandis.find(m=>m.id===mandiId)||{name:"My Mandi",maxEmp:10};
+  const maxEmp=currentSession.maxEmp||mandi.maxEmp||10;
+  const fromSA=currentSession.fromSuperAdmin;
+
+  function save(){ persist(); }
+
+  const wrap=div({minHeight:"100vh",background:C.paper});
+
+  // HEADER
+  const todayIn=MD.txns.filter(t=>t.dir==="IN"&&t.date===today()).reduce((s,t)=>s+t.qty,0);
+  const todayOut=MD.txns.filter(t=>t.dir==="OUT"&&t.date===today()).reduce((s,t)=>s+t.qty,0);
+  wrap.appendChild(div({background:C.dark,padding:"11px 16px",display:"flex",
+    alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8},[
+    div({display:"flex",alignItems:"center",gap:10},[
+      fromSA?btn("← SA",()=>{currentSession={role:"superadmin"};render();},
+        {background:"transparent",border:"1px solid #334155",color:"#94A3B8",padding:"5px 10px",fontSize:12}):null,
+      div({background:C.saffron,width:32,height:32,borderRadius:7,display:"flex",
+        alignItems:"center",justifyContent:"center",fontSize:18},["📦"]),
+      div({},[
+        el("div",{style:{fontWeight:800,color:"#fff",fontSize:14}},[mandi.name]),
+        el("div",{style:{color:"#64748B",fontSize:10}},["Mandi Admin Dashboard"])
+      ])
+    ]),
+    div({display:"flex",alignItems:"center",gap:10},[
+      div({background:"#1E293B",borderRadius:8,padding:"5px 12px",display:"flex",gap:14},[
+        div({textAlign:"center"},[
+          el("div",{style:{color:"#86EFAC",fontWeight:800,fontSize:14}},[String(todayIn)]),
+          el("div",{style:{color:"#64748B",fontSize:9}},["IN today"])
+        ]),
+        div({textAlign:"center"},[
+          el("div",{style:{color:"#FCA5A5",fontWeight:800,fontSize:14}},[String(todayOut)]),
+          el("div",{style:{color:"#64748B",fontSize:9}},["OUT today"])
+        ])
+      ]),
+      btn("Sign Out",()=>{currentSession=null;maTab="writer";render();},
+        {background:"transparent",border:"1px solid #334155",color:"#94A3B8",padding:"6px 12px",fontSize:12})
+    ])
+  ]));
+
+  // TABS
+  const tabs=[
+    ["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],
+    ["ledger","⚖️ Ledger"],["history","📋 History"],["admin","⚙️ Admin"]
+  ];
+  const tabBar=div({background:C.card,borderBottom:`1px solid ${C.border}`,
+    display:"flex",overflowX:"auto"});
+  const body=div({padding:16,maxWidth:960,margin:"0 auto"});
+
+  function setMATab(k){
+    maTab=k;
+    tabBar.querySelectorAll("button").forEach(b=>{
+      const active=b.dataset.tab===k;
+      b.style.color=active?C.teal:C.muted;
+      b.style.borderBottomColor=active?C.teal:"transparent";
+    });
+    renderMABody();
+  }
+
+  tabs.forEach(([k,lbl])=>{
+    const b=el("button",{"data-tab":k,onclick:()=>setMATab(k),style:{
+      padding:"10px 13px",border:"none",background:"none",cursor:"pointer",
+      fontWeight:700,fontSize:12,borderBottom:"2px solid transparent",
+      marginBottom:-1,whiteSpace:"nowrap",
+      color:maTab===k?C.teal:C.muted,
+      borderBottomColor:maTab===k?C.teal:"transparent"
+    }},[lbl]);
+    tabBar.appendChild(b);
+  });
+  wrap.appendChild(tabBar);
+  wrap.appendChild(body);
+
+  // ── WRITER TAB ──
+  function renderWriter(){
+    body.innerHTML="";
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,color:C.teal,marginBottom:4}},["✍️ Writer Station"]));
+    body.appendChild(el("div",{style:{fontSize:12,color:C.muted,marginBottom:16}},["Register incoming vehicle · segregate crates into lots · print slip"]));
+
+    // Today's vehicles
+    const todayV=MD.vehicles.filter(v=>v.date===today());
+    if(todayV.length){
+      body.appendChild(el("div",{style:{fontWeight:700,fontSize:13,marginBottom:8}},["Today's Vehicles"]));
+      todayV.forEach(v=>{
+        body.appendChild(card([
+          div({display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"},[
+            el("span",{style:{fontSize:20}},["🚛"]),
+            div({flex:1},[
+              el("div",{style:{fontWeight:700,fontSize:13}},[v.vehicleNo+" · "+v.time]),
+              el("div",{style:{fontSize:11,color:C.muted}},["Total: "+v.totalIn+" · Lots: "+v.lots.length+" · "+(v.outDone?"✅ OUT done":"⏳ Awaiting OUT")])
+            ]),
+            badge(v.status==="segregated"?"Segregated":"Arrived",v.status==="segregated"?C.green:C.gold),
+            btn("🖨 Slip",()=>printSlip(v,mandi),{background:C.teal,fontSize:12,padding:"6px 10px"})
+          ])
+        ]));
+      });
+    }
+
+    // New vehicle form
+    let vNo="",countMethod="count",totalStr="",transporterId="";
+    const transporters=MD.people.filter(p=>p.type==="transporter"&&p.active);
+
+    const formCard=card([
+      el("div",{style:{fontWeight:700,fontSize:14,marginBottom:14}},["🚛 Register New Vehicle"])
+    ]);
+
+    const vNoInp=inp("TS09EA1234","",v=>vNo=v.toUpperCase());
+    formCard.appendChild(field("VEHICLE NUMBER *",vNoInp));
+
+    const countInp=inp("200","",v=>totalStr=v,"number",{fontSize:22,fontWeight:800,textAlign:"center"});
+    formCard.appendChild(field("TOTAL CRATES ARRIVED *",countInp));
+
+    const trnSelEl=sel("",
+      [["","— No Transporter —"],...transporters.map(t=>[t.id,`${t.name} · ₹${t.ratePerCrate||0}/crate`])],
+      v=>transporterId=v);
+    formCard.appendChild(field("TRANSPORTER (optional)",trnSelEl));
+
+    formCard.appendChild(btn("Proceed to Lot Segregation →",()=>{
+      if(!vNo.trim()){showToast("Enter vehicle number","err");return;}
+      const total=parseInt(totalStr||0);
+      if(!total||total<=0){showToast("Enter total crates","err");return;}
+      const trn=transporters.find(t=>t.id===transporterId);
+      const vehicle={
+        id:"V"+uid(),vehicleNo:vNo.trim().toUpperCase(),date:today(),time:timeNow(),
+        totalIn:total,status:"arrived",outDone:false,
+        transporterId,transporterName:trn?.name||"",ratePerCrate:trn?.ratePerCrate||0,lots:[]
+      };
+      showSegregationModal(vehicle);
+    },{width:"100%",padding:11,marginTop:4}));
+    body.appendChild(formCard);
+  }
+
+  function showSegregationModal(vehicle){
+    let lots=[];
+    let personType="farmer",selectedPerson="",qtyStr="",isOther=false;
+
+    const overlayDiv=div({position:"fixed",inset:0,background:"rgba(0,0,0,.65)",
+      zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:12});
+    document.body.appendChild(overlayDiv);
+
+    function rebuildModal(){
+      overlayDiv.innerHTML="";
+      const total=vehicle.totalIn;
+      const done=lots.reduce((s,l)=>s+l.qty,0);
+      const rem=total-done;
+
+      const farmers=MD.people.filter(p=>p.type==="farmer"&&p.active);
+      const buyers=MD.people.filter(p=>p.type==="buyer"&&p.active);
+      const people=personType==="farmer"?farmers:buyers;
+
+      const box=div({background:C.card,borderRadius:16,width:"100%",maxWidth:560,
+        maxHeight:"92vh",overflowY:"auto"});
+
+      // header
+      box.appendChild(div({display:"flex",justifyContent:"space-between",alignItems:"center",
+        padding:"14px 18px",borderBottom:`1px solid ${C.border}`,
+        position:"sticky",top:0,background:C.card,zIndex:1},[
+        el("div",{style:{fontWeight:800,fontSize:15}},["📂 Lot Segregation — "+vehicle.vehicleNo]),
+        btn("×",()=>{overlayDiv.remove();},{background:"none",color:C.muted,border:"none",fontSize:24})
+      ]));
+
+      const content=div({padding:18});
+
+      // progress
+      content.appendChild(div({background:C.paper,borderRadius:6,height:10,overflow:"hidden",marginBottom:4},[
+        div({background:done===total?C.green:done>total?C.red:C.teal,height:10,borderRadius:6,
+          width:Math.min(100,done/Math.max(total,1)*100)+"%",transition:"width .3s"})
+      ]));
+      content.appendChild(div({display:"flex",justifyContent:"space-between",fontSize:11,
+        color:C.muted,marginBottom:14},[
+        el("span",{},["Done: "+done+" / "+total]),
+        el("span",{style:{color:rem<0?C.red:rem===0?C.green:C.teal}},
+          [rem<0?`Over by ${-rem}`:rem===0?"✅ Complete":`${rem} remaining`])
+      ]));
+
+      // toggle own/other
+      const toggleRow=div({display:"flex",gap:6,marginBottom:10});
+      [["📦 Our Crate",false],[" 🔶 Other Box",true]].forEach(([lbl,val])=>{
+        toggleRow.appendChild(btn(lbl,()=>{isOther=val;rebuildModal();},{
+          flex:1,background:isOther===val?(val?C.gold:C.teal):"#fff",
+          color:isOther===val?"#fff":(val?C.gold:C.teal),
+          border:`2px solid ${val?C.gold:C.teal}`,padding:"8px 4px",fontSize:11
+        }));
+      });
+      content.appendChild(toggleRow);
+
+      if(isOther){
+        content.appendChild(div({background:"#FFFBEB",border:`1px solid #FDE68A`,borderRadius:7,
+          padding:"7px 10px",fontSize:11,color:"#92400E",marginBottom:10},[
+          "🔶 Other Box: select the owner for tracking. Marked as 'Other Box' in all reports."
+        ]));
+      }
+
+      // add lot form
+      const addBox=div({background:isOther?"#FFFBEB":"#F0FDFA",
+        border:`1px solid ${isOther?"#FDE68A":"#99F6E4"}`,borderRadius:10,padding:14,marginBottom:12});
+
+      const typeSelEl=sel(personType,[["farmer","🌾 Farmer"],["buyer","🏪 Buyer"]],v=>{personType=v;selectedPerson="";rebuildModal();});
+      addBox.appendChild(field("PERSON TYPE",typeSelEl));
+
+      const personOpts=[["","— Select Person —"],...people.map(p=>[p.id,p.name])];
+      const personSelEl=sel(selectedPerson,personOpts,v=>selectedPerson=v);
+      const addPersonBtn=btn("+",()=>{showAddPersonModal(personType,()=>{rebuildModal();});},
+        {background:C.teal,padding:"0 10px",fontSize:18,borderRadius:7,marginLeft:4});
+      addBox.appendChild(field("SELECT PERSON",
+        div({display:"flex",gap:4},[personSelEl,addPersonBtn])));
+
+      const qtyInpEl=inp(`max ${rem}`,qtyStr,v=>qtyStr=v,"number",
+        {fontSize:22,fontWeight:800,textAlign:"center"});
+      addBox.appendChild(field("QUANTITY",qtyInpEl));
+
+      addBox.appendChild(btn(isOther?"Add Other Box Lot":"Add Lot",()=>{
+        const qty=parseInt(qtyStr||0);
+        if(qty<=0){showToast("Enter quantity","err");return;}
+        if(qty>rem){showToast(`Only ${rem} left`,"err");return;}
+        if(!selectedPerson){showToast("Select a person","err");return;}
+        const person=MD.people.find(p=>p.id===selectedPerson);
+        lots.push({lotNo:lots.length+1,personId:person.id,personName:person.name,
+          personType:person.type,qty,isOther});
+        qtyStr="";selectedPerson="";rebuildModal();
+      },{background:isOther?C.gold:C.teal,width:"100%",marginTop:4}));
+      content.appendChild(addBox);
+
+      // lots table
+      if(lots.length){
+        const tbl=el("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:12}});
+        tbl.appendChild(el("thead",{},[el("tr",{style:{background:C.paper}},
+          ["Lot","Person","Type","Box","Qty",""].map(h=>el("th",{style:{padding:"6px 8px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:10}},[h]))
+        )]));
+        const tbody=el("tbody",{});
+        lots.forEach((l,i)=>{
+          const row=el("tr",{style:{borderTop:`1px solid ${C.border}`,background:l.isOther?"#FFFBEB":i%2?"#fff":"#F8FAFC"}});
+          [l.lotNo,l.personName,l.personType==="farmer"?"🌾":"🏪",l.isOther?"Other":"Ours",l.qty].forEach((v,ci)=>{
+            row.appendChild(el("td",{style:{padding:"6px 8px",fontWeight:ci===4?700:400}},[String(v)]));
+          });
+          const delTd=el("td",{style:{padding:"6px 8px"}});
+          delTd.appendChild(btn("×",()=>{lots=lots.filter((_,j)=>j!==i).map((x,j)=>({...x,lotNo:j+1}));rebuildModal();},
+            {background:"none",border:"none",color:C.red,fontSize:18,padding:"0 4px"}));
+          row.appendChild(delTd);
+          tbody.appendChild(row);
+        });
+        // total row
+        const totRow=el("tr",{style:{background:"#F0FDF4",borderTop:`2px solid ${C.border}`}});
+        ["","TOTAL","","",lots.reduce((s,l)=>s+l.qty,0),""].forEach((v,i)=>{
+          totRow.appendChild(el("td",{style:{padding:"7px 8px",fontWeight:800}},[String(v)]));
+        });
+        tbody.appendChild(totRow);
+        tbl.appendChild(tbody);
+        content.appendChild(tbl);
+      }
+
+      if(lots.length&&done!==total){
+        content.appendChild(div({background:done>total?"#FEF2F2":"#FFFBEB",
+          border:`1px solid ${done>total?C.red:C.gold}`,borderRadius:8,
+          padding:"7px 12px",fontSize:12,fontWeight:600,
+          color:done>total?C.red:C.gold,marginBottom:10},
+          [done>total?`⛔ Over by ${done-total}`:`⚠️ ${total-done} crates unaccounted`]));
+      }
+
+      content.appendChild(div({display:"flex",gap:8},[
+        btn("✅ Confirm & Print Slip",()=>{
+          if(done!==total){showToast(`Lots (${done}) ≠ total crates (${total})`,"err");return;}
+          if(!lots.length){showToast("Add at least one lot","err");return;}
+          vehicle.lots=lots;vehicle.status="segregated";
+          MD.vehicles.push(vehicle);
+          const newTxns=lots.map(l=>({
+            id:"X"+uid(),vehicleNo:vehicle.vehicleNo,dir:"IN",personId:l.personId,
+            personName:l.personName,personType:l.personType,qty:l.qty,
+            date:today(),time:timeNow(),lotNo:l.lotNo,isOther:l.isOther,note:""
+          }));
+          MD.txns.push(...newTxns);
+          save();
+          overlayDiv.remove();
+          printSlip(vehicle,mandi);
+          renderMABody();
+          showToast(`${vehicle.vehicleNo} confirmed — ${lots.length} lots`);
+        },{flex:1,padding:10,background:done===total&&lots.length?C.green:"#94A3B8",
+          cursor:done===total&&lots.length?"pointer":"not-allowed"}),
+      ]));
+
+      box.appendChild(content);
+      overlayDiv.appendChild(box);
+    }
+    rebuildModal();
+  }
+
+  function showAddPersonModal(type,onAdded){
+    let name="",phone="",address="",ptype=type;
+    const content=div({},[
+      field("TYPE",sel(ptype,[["farmer","🌾 Farmer"],["buyer","🏪 Buyer"],["transporter","🚛 Transporter"]],v=>ptype=v)),
+      field("FULL NAME *",inp("e.g. Ramu Patel","",v=>name=v)),
+      field("PHONE",inp("9876543210","",v=>phone=v,"tel")),
+      field("ADDRESS",inp("Village, District","",v=>address=v)),
+      btn("Add Person",()=>{
+        if(!name.trim()){showToast("Name required","err");return;}
+        const id=(ptype==="farmer"?"F":ptype==="buyer"?"B":"T")+uid();
+        const newP={id,name,phone,address,type:ptype,active:true,ratePerCrate:0};
+        MD.people.push(newP);save();
+        document.querySelector(".add-person-overlay")?.remove();
+        showToast(name+" added!");
+        if(onAdded)onAdded();
+      },{width:"100%",marginTop:8})
+    ]);
+    const ov=div({position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:600,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:12});
+    ov.className="add-person-overlay";
+    const box=card([
+      div({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},[
+        el("div",{style:{fontWeight:800,fontSize:15}},["Add New Person"]),
+        btn("×",()=>ov.remove(),{background:"none",border:"none",color:C.muted,fontSize:22})
+      ]),
+      content
+    ],{maxWidth:380,width:"100%",margin:0});
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+  }
+
+  // ── BOX KEEPER TAB ──
+  function renderBoxKeeper(){
+    body.innerHTML="";
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,color:C.green,marginBottom:4}},["📦 Box Keeper Station"]));
+    body.appendChild(el("div",{style:{fontSize:12,color:C.muted,marginBottom:16}},["Confirm OUT per vehicle · WhatsApp balance alerts auto-sent"]));
+
+    const pending=MD.vehicles.filter(v=>v.status==="segregated"&&!v.outDone);
+    const done=MD.vehicles.filter(v=>v.outDone&&v.date===today());
+
+    if(!pending.length){
+      body.appendChild(card([
+        el("div",{style:{textAlign:"center",color:C.muted,padding:24}},
+          ["No vehicles pending OUT. Writer must register & segregate first."])
+      ]));
+    } else {
+      body.appendChild(el("div",{style:{fontWeight:700,fontSize:12,color:C.muted,
+        letterSpacing:"0.07em",marginBottom:10}},["PENDING OUT ("+pending.length+")"]));
+    }
+
+    pending.forEach(v=>{
+      const ourCrates=v.lots.filter(l=>!l.isOther).reduce((s,l)=>s+l.qty,0);
+      const otherBoxes=v.lots.filter(l=>l.isOther).reduce((s,l)=>s+l.qty,0);
+      body.appendChild(card([
+        div({display:"flex",justifyContent:"space-between",alignItems:"flex-start",
+          flexWrap:"wrap",gap:8,marginBottom:12},[
+          div({},[
+            el("div",{style:{fontWeight:800,fontSize:16}},["🚛 "+v.vehicleNo]),
+            el("div",{style:{fontSize:11,color:C.muted}},[fmtDate(v.date)+" · "+v.time+" · "+(v.transporterName||"No transporter")])
+          ]),
+          btn("Start OUT →",()=>showOutModal(v),{background:C.green})
+        ]),
+        div({display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8},[
+          ...([["Total",v.totalIn,C.dark],["Our Crates",ourCrates,C.teal],["Other Boxes",otherBoxes,C.gold]].map(([lbl,val,col])=>
+            div({background:C.paper,borderRadius:8,padding:"8px 10px",textAlign:"center"},[
+              el("div",{style:{fontWeight:800,fontSize:22,color:col}},[String(val)]),
+              el("div",{style:{fontSize:10,color:C.muted}},[lbl])
+            ])
+          ))
+        ])
+      ]));
+    });
+
+    if(done.length){
+      body.appendChild(el("div",{style:{fontWeight:700,fontSize:12,color:C.muted,
+        letterSpacing:"0.07em",marginTop:16,marginBottom:8}},["COMPLETED TODAY ✅"]));
+      done.forEach(v=>{
+        body.appendChild(div({background:"#F0FDF4",border:`1px solid ${C.greenL}`,
+          borderRadius:10,padding:"10px 14px",marginBottom:8,
+          display:"flex",justifyContent:"space-between",alignItems:"center"},[
+          div({},[
+            el("div",{style:{fontWeight:700,fontSize:13}},["🚛 "+v.vehicleNo]),
+            el("div",{style:{fontSize:11,color:C.muted}},[v.totalIn+" crates · OUT "+v.outTime])
+          ]),
+          badge("OUT Done",C.green)
+        ]));
+      });
+    }
+  }
+
+  function showOutModal(vehicle){
+    let note="";
+    const overlayDiv=div({position:"fixed",inset:0,background:"rgba(0,0,0,.65)",
+      zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:12});
+    document.body.appendChild(overlayDiv);
+
+    const content=div({});
+    content.appendChild(el("div",{style:{fontWeight:800,fontSize:16,marginBottom:4}},["OUT — 🚛 "+vehicle.vehicleNo]));
+    content.appendChild(el("div",{style:{fontSize:12,color:C.muted,marginBottom:14}},
+      ["Confirm crates leaving. All lots will be recorded as OUT."]));
+
+    // summary by lot
+    const tbl=el("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:12}});
+    tbl.appendChild(el("thead",{},[el("tr",{style:{background:C.paper}},
+      ["Lot","Person","Box","Qty"].map(h=>el("th",{style:{padding:"7px 8px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:10}},[h]))
+    )]));
+    const tbody=el("tbody",{});
+    vehicle.lots.forEach(l=>{
+      const row=el("tr",{style:{borderTop:`1px solid ${C.border}`,background:l.isOther?"#FFFBEB":"#fff"}});
+      [l.lotNo,l.personName,l.isOther?"Other Box":"Our Crate",l.qty].forEach((v,i)=>{
+        row.appendChild(el("td",{style:{padding:"7px 8px",fontWeight:i===3?700:400}},[String(v)]));
+      });
+      tbody.appendChild(row);
+    });
+    tbl.appendChild(tbody);
+    content.appendChild(tbl);
+
+    content.appendChild(div({background:"#EFF6FF",borderRadius:8,padding:"10px 12px",
+      fontSize:12,marginBottom:12,border:`1px solid #BFDBFE`},[
+      el("div",{style:{fontWeight:700,color:C.blue,marginBottom:4}},["📱 Auto-sent on confirm:"]),
+      el("div",{style:{fontSize:11,color:C.blue}},["✅ WhatsApp (Telugu) to all persons with balance"])
+    ]));
+
+    content.appendChild(field("NOTE (optional)",inp("Any remarks...","",v=>note=v)));
+
+    content.appendChild(div({display:"flex",gap:8},[
+      btn("← Back",()=>overlayDiv.remove(),{background:"transparent",color:C.muted,border:`1px solid ${C.border}`}),
+      btn("✅ Confirm OUT + Send WhatsApp",()=>{
+        const outTxns=vehicle.lots.map(l=>({
+          id:"X"+uid(),vehicleNo:vehicle.vehicleNo,dir:"OUT",personId:l.personId,
+          personName:l.personName,personType:l.personType,qty:l.qty,
+          date:today(),time:timeNow(),lotNo:l.lotNo,isOther:l.isOther,note
+        }));
+        MD.txns.push(...outTxns);
+        MD.vehicles=MD.vehicles.map(v=>v.id===vehicle.id?{...v,outDone:true,outTime:timeNow()}:v);
+        save();
+
+        // send WA
+        const allTxns=[...MD.txns];
+        const notified=new Set();
+        vehicle.lots.forEach(l=>{
+          if(notified.has(l.personId))return;
+          notified.add(l.personId);
+          const person=MD.people.find(p=>p.id===l.personId);
+          if(!person?.phone)return;
+          const bal=getBalance(allTxns,l.personId);
+          const inToday=allTxns.filter(t=>t.personId===l.personId&&t.dir==="IN"&&t.date===today()).reduce((s,t)=>s+t.qty,0);
+          const outToday=allTxns.filter(t=>t.personId===l.personId&&t.dir==="OUT"&&t.date===today()).reduce((s,t)=>s+t.qty,0);
+          sendWA(person,vehicle.vehicleNo,inToday,outToday,bal.balance,mandi.name);
+        });
+
+        overlayDiv.remove();
+        renderMABody();
+        showToast(`OUT confirmed · messages sent to ${notified.size} person(s)!`);
+      },{flex:1,background:C.green,padding:10})
+    ]));
+
+    const box=div({background:C.card,borderRadius:16,width:"100%",maxWidth:480,
+      maxHeight:"92vh",overflowY:"auto"});
+    box.appendChild(div({display:"flex",justifyContent:"space-between",alignItems:"center",
+      padding:"14px 18px",borderBottom:`1px solid ${C.border}`,
+      position:"sticky",top:0,background:C.card},[
+      el("div",{style:{fontWeight:800,fontSize:15}},["Confirm OUT"]),
+      btn("×",()=>overlayDiv.remove(),{background:"none",color:C.muted,border:"none",fontSize:24})
+    ]));
+    box.appendChild(div({padding:18},[content]));
+    overlayDiv.appendChild(box);
+  }
+
+  // ── LEDGER TAB ──
+  function renderLedger(){
+    body.innerHTML="";
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,marginBottom:4}},["⚖️ Crate Balance Ledger"]));
+    body.appendChild(div({background:"#F0FDF4",border:`1px solid #BBF7D0`,borderRadius:8,
+      padding:"8px 12px",fontSize:12,marginBottom:16},[
+      el("b",{style:{color:C.green}},["Balance = All-time cumulative · "]),
+      el("span",{style:{color:C.muted}},["Total OUT − Total IN across all dates"])
+    ]));
+
+    ["farmer","buyer","transporter"].forEach(type=>{
+      const people=MD.people.filter(p=>p.type===type&&p.active);
+      if(!people.length)return;
+      body.appendChild(el("div",{style:{fontWeight:700,fontSize:11,color:C.muted,
+        letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10,marginTop:16}},
+        [type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters"]));
+      const grid=div({display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10,marginBottom:4});
+      people.forEach(p=>{
+        const bal=getBalance(MD.txns,p.id);
+        const c=card([],{cursor:"pointer",marginBottom:0});
+        c.appendChild(div({display:"flex",alignItems:"center",gap:8,marginBottom:10},[
+          div({width:34,height:34,borderRadius:"50%",flexShrink:0,
+            background:type==="farmer"?"#78350F":type==="buyer"?"#1E3A5F":"#4C1D95",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            color:C.saffron,fontWeight:800,fontSize:13},[p.name[0]]),
+          div({flex:1},[
+            el("div",{style:{fontWeight:700,fontSize:12}},[p.name]),
+            el("div",{style:{fontSize:10,color:C.muted}},[p.phone||"—"])
+          ]),
+          bal.balance>50?badge("HIGH",C.red):null
+        ]));
+        c.appendChild(div({display:"flex",justifyContent:"space-around",
+          background:C.paper,borderRadius:8,padding:"8px 4px",marginBottom:10},[
+          ...[["OUT",bal.totalOut,C.red],["IN",bal.totalIn,C.green],
+              ["BAL",bal.balance,bal.balance>50?C.red:bal.balance>0?C.gold:C.muted]].map(([lbl,val,col])=>
+            div({textAlign:"center"},[
+              el("div",{style:{fontWeight:800,fontSize:lbl==="BAL"?22:15,color:col}},[String(val)]),
+              el("div",{style:{fontSize:8,color:C.muted,marginTop:1}},[lbl])
+            ])
+          )
+        ]));
+        if(p.phone){
+          c.appendChild(btn("📱 WhatsApp Balance",()=>{
+            const b=getBalance(MD.txns,p.id);
+            sendWA(p,"—",b.totalIn,b.totalOut,b.balance,mandi.name);
+          },{background:"#25D366",width:"100%",fontSize:12,padding:"7px"}));
+        }
+        c.onclick=e=>{if(!e.target.closest("button"))showPersonHistory(p);}
+        grid.appendChild(c);
+      });
+      body.appendChild(grid);
+    });
+  }
+
+  function showPersonHistory(person){
+    const txns=MD.txns.filter(t=>t.personId===person.id);
+    const bal=getBalance(MD.txns,person.id);
+    const content=div({});
+
+    content.appendChild(div({background:"#F0FDF4",border:`1px solid #BBF7D0`,
+      borderRadius:10,padding:12,marginBottom:14},[
+      el("div",{style:{fontSize:11,color:C.muted,marginBottom:4}},["ALL-TIME BALANCE"]),
+      div({display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"},[
+        ...[["OUT",bal.totalOut,C.red],["−","",C.muted],["IN",bal.totalIn,C.green],
+            ["=","",C.muted],["BALANCE",bal.balance,bal.balance>0?C.saffronD:C.green]].map(([lbl,val,col])=>
+          div({textAlign:"center"},[
+            el("div",{style:{fontWeight:900,fontSize:lbl==="BALANCE"?30:20,color:col}},[String(val)]),
+            el("div",{style:{fontSize:9,color:C.muted}},[lbl])
+          ])
+        )
+      ])
+    ]));
+
+    if(!txns.length){
+      content.appendChild(el("div",{style:{textAlign:"center",color:C.muted,padding:20}},["No transactions yet"]));
+    }
+    txns.slice().reverse().forEach(t=>{
+      content.appendChild(div({display:"flex",alignItems:"center",gap:8,
+        padding:"6px 0",borderBottom:`1px solid ${C.border}`},[
+        el("span",{style:{background:t.dir==="IN"?C.greenL:C.redL,
+          color:t.dir==="IN"?C.green:C.red,borderRadius:4,padding:"2px 7px",
+          fontWeight:800,fontSize:10,flexShrink:0}},[t.dir]),
+        t.isOther?badge("Other Box",C.gold):null,
+        el("span",{style:{flex:1,fontSize:11,color:C.muted}},[fmtDate(t.date)+" "+t.time+" · "+(t.vehicleNo||"—")]),
+        t.lotNo?el("span",{style:{fontSize:10,color:C.teal,fontWeight:700}},["Lot "+t.lotNo]):null,
+        el("span",{style:{fontWeight:800,color:C.saffron}},[String(t.qty)])
+      ]));
+    });
+    modal("History — "+person.name,content,null,false);
+  }
+
+  // ── HISTORY TAB ──
+  function renderHistory(){
+    body.innerHTML="";
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,marginBottom:14}},["📋 Transaction History"]));
+
+    let filterDate="",filterDir="all",filterType="all",filterSearch="";
+
+    const filterCard=card([]);
+    const grid=div({display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:8,marginBottom:8});
+
+    const dateInp=el("input",{type:"date",value:"",style:{width:"100%",background:C.paper,
+      border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 10px",fontSize:12,
+      fontFamily:"inherit",outline:"none",boxSizing:"border-box"}});
+    dateInp.onchange=e=>{filterDate=e.target.value;refreshList();};
+    grid.appendChild(field("DATE",dateInp));
+
+    const dirSel=sel("all",[["all","All Directions"],["IN","IN Only"],["OUT","OUT Only"]],v=>{filterDir=v;refreshList();});
+    grid.appendChild(field("DIRECTION",dirSel));
+
+    const typeSel=sel("all",[["all","All Types"],["farmer","Farmers"],["buyer","Buyers"],["transporter","Transporters"]],v=>{filterType=v;refreshList();});
+    grid.appendChild(field("TYPE",typeSel));
+
+    const searchInp=inp("Name / Vehicle...","",v=>{filterSearch=v;refreshList();});
+    grid.appendChild(field("SEARCH",searchInp));
+
+    filterCard.appendChild(grid);
+
+    const countDiv=el("div",{style:{fontSize:11,color:C.muted}},["Showing all"]);
+    filterCard.appendChild(countDiv);
+    body.appendChild(filterCard);
+
+    const listDiv=div({});
+    body.appendChild(listDiv);
+
+    function refreshList(){
+      const filtered=MD.txns.filter(t=>{
+        if(filterDate&&t.date!==filterDate)return false;
+        if(filterDir!=="all"&&t.dir!==filterDir)return false;
+        if(filterType!=="all"&&t.personType!==filterType)return false;
+        if(filterSearch){
+          const s=filterSearch.toLowerCase();
+          if(!t.personName.toLowerCase().includes(s)&&!(t.vehicleNo||"").toLowerCase().includes(s))return false;
+        }
+        return true;
+      }).slice().reverse();
+
+      countDiv.textContent=`Showing ${filtered.length} of ${MD.txns.length} transactions`;
+      listDiv.innerHTML="";
+      if(!filtered.length){
+        listDiv.appendChild(el("div",{style:{textAlign:"center",color:C.muted,padding:40}},["No transactions match filters"]));
+        return;
+      }
+      filtered.forEach(t=>{
+        listDiv.appendChild(div({background:t.isOther?"#FFFBEB":C.card,
+          border:`1px solid ${t.isOther?"#FDE68A":C.border}`,
+          borderRadius:9,padding:"9px 12px",marginBottom:6,
+          display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"},[
+          el("span",{style:{background:t.dir==="IN"?C.greenL:C.redL,
+            color:t.dir==="IN"?C.green:C.red,borderRadius:5,
+            padding:"2px 8px",fontWeight:800,fontSize:10,flexShrink:0}},[t.dir]),
+          t.isOther?badge("OTHER BOX",C.gold):null,
+          div({flex:1,minWidth:100},[
+            el("div",{style:{fontWeight:700,fontSize:12}},[t.personName]),
+            el("div",{style:{fontSize:10,color:C.muted}},[t.personType+(t.vehicleNo?" · 🚛 "+t.vehicleNo:"")+(t.lotNo?" · Lot "+t.lotNo:"")])
+          ]),
+          el("div",{style:{fontWeight:800,fontSize:16,color:t.isOther?C.gold:C.saffron}},[String(t.qty)]),
+          el("div",{style:{fontSize:10,color:C.muted,textAlign:"right"}},[fmtDate(t.date)+"\n"+t.time])
+        ]));
+      });
+    }
+    refreshList();
+  }
+
+  // ── ADMIN TAB ──
+  function renderAdmin(){
+    body.innerHTML="";
+    body.appendChild(el("div",{style:{fontWeight:800,fontSize:18,marginBottom:4}},["⚙️ Admin Panel"]));
+    body.appendChild(el("div",{style:{fontSize:11,color:C.muted,marginBottom:16}},
+      [`Employees: ${MD.employees.filter(e=>e.active).length} / ${maxEmp} (limit set by Super Admin)`]));
+
+    // stat cards
+    const todayTxns=MD.txns.filter(t=>t.date===today());
+    const statsGrid=div({display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:10,marginBottom:20});
+    [["Vehicles",MD.vehicles.filter(v=>v.date===today()).length,"🚛",C.teal],
+     ["Crates IN",todayTxns.filter(t=>t.dir==="IN").reduce((s,t)=>s+t.qty,0),"⬇",C.green],
+     ["Crates OUT",todayTxns.filter(t=>t.dir==="OUT").reduce((s,t)=>s+t.qty,0),"⬆",C.red],
+     ["People",MD.people.filter(p=>p.active).length,"👥",C.blue]].forEach(([lbl,val,icon,col])=>{
+      statsGrid.appendChild(card([
+        el("div",{style:{fontSize:18,marginBottom:4}},[icon]),
+        el("div",{style:{fontWeight:800,fontSize:20,color:col}},[String(val)]),
+        el("div",{style:{fontSize:11,color:C.muted}},[lbl])
+      ],{marginBottom:0}));
+    });
+    body.appendChild(statsGrid);
+
+    // ── Employees ──
+    const empSection=card([]);
+    const empHdr=div({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},[
+      div({},[
+        el("div",{style:{fontWeight:700,fontSize:14}},["👤 Employees"]),
+        el("div",{style:{fontSize:11,color:MD.employees.filter(e=>e.active).length>=maxEmp?C.red:C.muted}},
+          [MD.employees.filter(e=>e.active).length+" / "+maxEmp+" active"])
+      ]),
+      btn("+ Add Employee",()=>{
+        if(MD.employees.filter(e=>e.active).length>=maxEmp){
+          showToast(`Limit reached (${maxEmp}). Contact Super Admin to increase.`,"err");return;
+        }
+        showAddEmpModal();
+      },{background:C.teal,fontSize:12,padding:"7px 12px"})
+    ]);
+    empSection.appendChild(empHdr);
+
+    if(!MD.employees.length){
+      empSection.appendChild(el("div",{style:{color:C.muted,fontSize:12,textAlign:"center",padding:12}},["No employees yet. Add your first employee."]));
+    }
+    MD.employees.forEach(emp=>{
+      empSection.appendChild(div({display:"flex",alignItems:"center",gap:10,
+        padding:"9px 0",borderTop:`1px solid ${C.border}`,flexWrap:"wrap",opacity:emp.active?1:.6},[
+        div({width:34,height:34,borderRadius:"50%",background:emp.active?C.dark:"#94A3B8",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          color:C.saffron,fontWeight:800,fontSize:12,flexShrink:0},[emp.name[0]]),
+        div({flex:1},[
+          el("div",{style:{fontWeight:700,fontSize:13}},[emp.name]),
+          el("div",{style:{fontSize:11,color:C.muted}},[emp.phone+" · PIN: "+emp.pin])
+        ]),
+        badge(emp.role,emp.role==="writer"?C.teal:emp.role==="boxkeeper"?C.green:C.blue),
+        badge(emp.active?"Active":"Inactive",emp.active?C.green:C.muted),
+        ghostBtn(emp.active?"Deactivate":"Activate",()=>{
+          MD.employees=MD.employees.map(e=>e.id===emp.id?{...e,active:!e.active}:e);
+          save();renderAdmin();
+        },emp.active?C.red:C.green)
+      ]));
+    });
+    body.appendChild(empSection);
+
+    // ── People ──
+    body.appendChild(el("div",{style:{fontWeight:700,fontSize:14,marginBottom:10,marginTop:8}},["👥 People Directory"]));
+    const addBtns=div({display:"flex",gap:8,marginBottom:12});
+    [["🌾 Add Farmer","farmer"],["🏪 Add Buyer","buyer"],["🚛 Add Transporter","transporter"]].forEach(([lbl,type])=>{
+      addBtns.appendChild(btn(lbl,()=>showAddPersonModal(type,()=>{renderAdmin();}),
+        {background:type==="farmer"?C.amber:type==="buyer"?C.blue:C.saffron,fontSize:12,padding:"7px 12px"}));
+    });
+    body.appendChild(addBtns);
+
+    ["farmer","buyer","transporter"].forEach(type=>{
+      const people=MD.people.filter(p=>p.type===type);
+      if(!people.length)return;
+      body.appendChild(el("div",{style:{fontWeight:700,fontSize:11,color:C.muted,
+        letterSpacing:"0.07em",textTransform:"uppercase",marginTop:12,marginBottom:8}},
+        [type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters"]));
+      people.forEach(p=>{
+        const bal=getBalance(MD.txns,p.id);
+        body.appendChild(div({background:C.card,border:`1px solid ${p.active?C.border:"#FEE2E2"}`,
+          borderRadius:8,padding:"10px 12px",marginBottom:6,
+          display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",opacity:p.active?1:.7},[
+          div({flex:1},[
+            el("div",{style:{fontWeight:700,fontSize:13}},[p.name+(p.active?"":" (inactive)")]),
+            el("div",{style:{fontSize:11,color:C.muted}},[p.phone+" · "+(p.address||"—")]),
+            type==="transporter"?el("div",{style:{fontSize:11,color:C.saffronD}},["₹"+(p.ratePerCrate||0)+"/crate"]):null
+          ]),
+          el("div",{style:{fontWeight:800,color:C.saffron,fontSize:13,textAlign:"center",minWidth:50}},[
+            String(bal.balance),el("div",{style:{fontSize:9,color:C.muted,fontWeight:400}},["balance"])
+          ]),
+          ghostBtn(p.active?"Deactivate":"Activate",()=>{
+            MD.people=MD.people.map(x=>x.id===p.id?{...x,active:!x.active}:x);
+            save();renderAdmin();
+          },p.active?C.red:C.green)
+        ]));
+      });
+    });
+  }
+
+  function showAddEmpModal(){
+    let name="",phone="",role="writer",pin="";
+    const content=div({},[
+      field("FULL NAME *",inp("Full name","",v=>name=v)),
+      field("PHONE",inp("9876543210","",v=>phone=v,"tel")),
+      field("ROLE",sel("writer",[["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],
+        ["scanner","📷 Scanner"],["supervisor","👁 Supervisor"]],v=>role=v)),
+      field("PIN (4 digits) *",inp("1234","",v=>pin=v,"number"),
+        "Used for employee login on shared device"),
+      btn("Add Employee",()=>{
+        if(!name.trim()||!pin.trim()){showToast("Name & PIN required","err");return;}
+        if(pin.length<4){showToast("PIN must be at least 4 digits","err");return;}
+        const id="E"+uid();
+        MD.employees.push({id,name,phone,role,pin,active:true});
+        save();
+        document.querySelectorAll("[style*='position:fixed']").forEach(o=>{if(o.id!=="toast")o.remove();});
+        renderAdmin();
+        showToast(name+" added as "+role+"!");
+      },{width:"100%",marginTop:8})
+    ]);
+    modal("Add Employee",content,null,false);
+  }
+
+  // ── MAIN RENDER ──
+  function renderMABody(){
+    body.innerHTML="";
+    if(maTab==="writer") renderWriter();
+    else if(maTab==="boxkeeper") renderBoxKeeper();
+    else if(maTab==="ledger") renderLedger();
+    else if(maTab==="history") renderHistory();
+    else if(maTab==="admin") renderAdmin();
+  }
+
+  renderMABody();
+  return wrap;
+}
+
+// ─── PRINT SLIP ───────────────────────────────────────────────
+function printSlip(vehicle,mandi){
+  const rate=vehicle.ratePerCrate||0;
+  const charge=vehicle.totalIn*rate;
+  const html=`<!DOCTYPE html><html><head><title>Slip ${vehicle.vehicleNo}</title>
+  <style>*{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',monospace;padding:20px;font-size:12px;max-width:680px;margin:0 auto}
+  h1{font-size:17px;text-align:center}
+  .sub{text-align:center;font-size:10px;color:#555;margin-bottom:2px}
+  .dbl{border-top:3px double #000;margin:8px 0}
+  .dash{border-top:1px dashed #000;margin:6px 0}
+  .title2{text-align:center;font-weight:bold;font-size:13px;margin:5px 0}
+  table{width:100%;border-collapse:collapse;margin-bottom:6px}
+  th{background:#eee;padding:4px 7px;border:1px solid #999;font-size:11px;text-align:left}
+  td{padding:4px 7px;border:1px solid #ccc;font-size:11px}
+  .other td{background:#fffbe6}.total td{background:#f0f0f0;font-weight:bold}
+  .charge{border:2px solid #000;padding:10px;margin:8px 0;background:#f9f9f9}
+  .cline{display:flex;justify-content:space-between;margin:3px 0}
+  .ctotal{display:flex;justify-content:space-between;margin-top:8px;padding-top:6px;border-top:2px solid #000;font-weight:bold;font-size:14px}
+  .sign{display:flex;justify-content:space-around;margin-top:28px}
+  .sline{border-top:1px solid #000;padding-top:4px;font-size:10px;text-align:center;width:130px;margin-top:24px}
+  .footer{text-align:center;font-size:9px;color:#aaa;margin-top:12px}
+  </style></head><body>
+  <h1>${mandi.name||"Mandi"}</h1>
+  <div class="sub">${mandi.address||""}</div>
+  <div class="sub">Ph: ${mandi.phone||""} ${mandi.gstin?"| GSTIN: "+mandi.gstin:""}</div>
+  <div class="dbl"></div>
+  <div class="title2">VEHICLE RECEIPT CUM LOT REGISTER</div>
+  <div class="dash"></div>
+  <table style="border:none;margin-bottom:8px">
+    <tr><td style="border:none"><b>Vehicle No:</b> ${vehicle.vehicleNo}</td>
+    <td style="border:none;text-align:right"><b>Date:</b> ${fmtDate(vehicle.date)} ${vehicle.time}</td></tr>
+    <tr><td style="border:none"><b>Transporter:</b> ${vehicle.transporterName||"—"}</td>
+    <td style="border:none;text-align:right"><b>Slip No:</b> ${vehicle.id}</td></tr>
+  </table>
+  <table>
+    <tr><td colspan="2"><b>Total Crates</b></td><td style="text-align:right"><b>${vehicle.totalIn}</b></td></tr>
+    <tr><td colspan="2">Our Mandi Crates</td><td style="text-align:right">${vehicle.lots.filter(l=>!l.isOther).reduce((s,l)=>s+l.qty,0)}</td></tr>
+    <tr style="background:#fffbe6"><td colspan="2">Other Boxes</td><td style="text-align:right">${vehicle.lots.filter(l=>l.isOther).reduce((s,l)=>s+l.qty,0)}</td></tr>
+  </table>
+  <div class="dash"></div>
+  <div class="title2">LOT SEGREGATION</div>
+  <table>
+    <thead><tr><th>Lot</th><th>Name</th><th>Type</th><th>Box</th><th style="text-align:right">Qty</th></tr></thead>
+    <tbody>
+      ${vehicle.lots.map(l=>`<tr${l.isOther?' class="other"':""}>
+        <td style="text-align:center">${l.lotNo}</td>
+        <td>${l.personName}</td>
+        <td>${l.personType==="farmer"?"Farmer":l.personType==="buyer"?"Buyer":"Transporter"}</td>
+        <td>${l.isOther?"Other Box":"Our Crate"}</td>
+        <td style="text-align:right"><b>${l.qty}</b></td>
+      </tr>`).join("")}
+      <tr class="total"><td colspan="4">TOTAL</td><td style="text-align:right">${vehicle.lots.reduce((s,l)=>s+l.qty,0)}</td></tr>
+    </tbody>
+  </table>
+  ${rate>0?`<div class="dash"></div>
+  <div class="title2">TRANSPORTER CHARGE</div>
+  <div class="charge">
+    <div class="cline"><span>Transporter</span><span><b>${vehicle.transporterName}</b></span></div>
+    <div class="cline"><span>Total Crates</span><span><b>${vehicle.totalIn}</b></span></div>
+    <div class="cline"><span>Rate Per Crate</span><span><b>${fmtMoney(rate)}</b></span></div>
+    <div class="ctotal"><span>TOTAL (${vehicle.totalIn} × ${fmtMoney(rate)})</span><span>${fmtMoney(charge)}</span></div>
+  </div>`:""}
+  <div class="sign">
+    <div><div class="sline">Writer</div></div>
+    <div><div class="sline">Transporter</div></div>
+    <div><div class="sline">Supervisor</div></div>
+  </div>
+  <div class="footer">CrateTrack Pro — ${new Date().toLocaleString("en-IN")}</div>
+  </body></html>`;
+  const w=window.open("","_blank","width=820,height=650");
+  if(w){w.document.write(html);w.document.close();w.focus();setTimeout(()=>w.print(),600);}
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
