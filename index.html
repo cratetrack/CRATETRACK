@@ -186,9 +186,14 @@ function buildInitial(){
 }
 
 var DB=loadDB()||buildInitial();
-var SESSION=null;
-var maTab="writer";
-var saTab="overview";
+var SESSION=(function(){try{var s=localStorage.getItem("ct_session");if(s){var d=JSON.parse(s);// Validate session still matches current DB credentials
+if(d.role==="superadmin"&&DB.superAdmin&&DB.superAdmin.email)return d;
+if(d.role==="mandiadmin"&&(DB.mandis||[]).find(function(m){return m.id===d.mandiId;}))return d;
+if(d.role==="employee"){var mid=d.mandiId;var md=DB.mandiData&&DB.mandiData[mid];if(md&&(md.employees||[]).find(function(e){return e.id===d.empId&&e.active;}))return d;}
+if(d.role==="supervisor"&&(DB.supervisors||[]).find(function(s2){return s2.id===d.supervisorId&&s2.active;}))return d;}}catch(e){}return null;})();
+var maTab=SESSION?( SESSION.lastTab||"writer" ):"writer";
+var saTab=SESSION&&SESSION.lastSaTab?SESSION.lastSaTab:"overview";
+function saveSession(){try{if(SESSION)localStorage.setItem("ct_session",JSON.stringify(SESSION));else localStorage.removeItem("ct_session");}catch(e){}}
 
 // ── FIX 5: Real-time polling ──
 var _pollTimer=null;
@@ -242,7 +247,7 @@ function toast(msg,type){
 
 // ── DOM HELPERS ──
 function mk(tag,cls,style){var e=document.createElement(tag);if(cls)e.className=cls;if(style)Object.assign(e.style,style);return e;}
-function ap(p){for(var i=1;i<arguments.length;i++){var c=arguments[i];if(c==null)continue;p.appendChild(c instanceof Node?c:document.createTextNode(String(c)));}return p;}
+function ap(p){var last=p;for(var i=1;i<arguments.length;i++){var c=arguments[i];if(c==null)continue;last=c instanceof Node?c:document.createTextNode(String(c));p.appendChild(last);}return arguments.length===2?last:p;}
 function Inp(ph,val,cb,type,bigCls){var i=mk("input");i.className="inp"+(bigCls?" "+bigCls:"");i.type=type||"text";i.value=val==null?"":String(val);i.placeholder=ph||"";i.addEventListener("input",function(e){cb(e.target.value);});return i;}
 function Sel(val,opts,cb){var s=mk("select","inp");(opts||[]).forEach(function(o){var el=mk("option");el.value=o[0];el.textContent=o[1];if(String(o[0])===String(val))el.selected=true;s.appendChild(el);});s.addEventListener("change",function(e){cb(e.target.value);});return s;}
 function Fld(lbl,inputEl,note){var f=mk("div","fld");if(lbl){var l=mk("div","lbl");l.textContent=lbl;f.appendChild(l);}if(inputEl)f.appendChild(inputEl);if(note){var n=mk("div",null,{fontSize:"10px",color:T.muted,marginTop:"3px"});n.textContent=note;f.appendChild(n);}return f;}
@@ -256,14 +261,40 @@ function dlCSV(rows,headers,filename){var q=function(v){return'"'+String(v==null
 // ── MESSAGES ──
 function buildWA(name,vno,crIn,crOut,bal,mName){return "📦 *"+mName+"* నుండి సందేశం\n\nప్రియమైన *"+name+"* గారికి,\n\nవాహనం: *"+(vno||"—")+"*\n📥 నేడు వచ్చిన క్రేట్లు: *"+crIn+"*\n📤 నేడు వెళ్ళిన క్రేట్లు: *"+crOut+"*\n⚖️ మీ దగ్గర మొత్తం బాకీ: *"+bal+" క్రేట్లు*\n\nదయచేసి వీలైనంత త్వరగా తిరిగి ఇవ్వగలరు.\n📞 మండీ కార్యాలయం సంప్రదించండి.\n— CrateTrack Pro";}
 function buildSMS(name,vno,crIn,crOut,bal,mName){return mName+" నుండి సందేశం:\n"+name+" గారికి, వాహనం: "+(vno||"—")+"\nవచ్చిన క్రేట్లు: "+crIn+"\nవెళ్ళిన క్రేట్లు: "+crOut+"\nమీ దగ్గర బాకీ: "+bal+" క్రేట్లు\nవీలైనంత త్వరగా తిరిగి ఇవ్వగలరు - CrateTrack";}
-// FIX 7: Transporter WA message with farmer details in Telugu
-function buildTransporterWA(tName,mName,farmers,vno){
-  var lines="📦 *"+mName+"* నుండి సందేశం\n\nప్రియమైన *"+tName+"* గారికి (Transporter),\n\nవాహనం: *"+(vno||"—")+"*\nమీ వాహనంలో వచ్చిన రైతుల వివరాలు:\n\n";
-  farmers.forEach(function(f){lines+="🌾 *"+f.name+"* — "+f.qty+" క్రేట్లు\n";});
-  lines+="\nమీరు ఈ క్రేట్లు సేకరించాలి:\n";
-  var total=farmers.reduce(function(s,f){return s+f.qty;},0);
-  lines+="మొత్తం: *"+total+" క్రేట్లు*\n\nదయచేసి వీలైనంత త్వరగా పరిష్కరించగలరు.\n📞 మండీ కార్యాలయం సంప్రదించండి.\n— CrateTrack Pro";
-  return lines;
+// Transporter WA message — full balance per farmer, Telugu, all-time pending
+function buildTransporterWA(tName,mName,farmers,vno,totalBal){
+  // farmers = [{name, qty (pending balance), vehicleNo}]
+  var total=totalBal||farmers.reduce(function(s,f){return s+f.qty;},0);
+  var msg="📦 *"+mName+"* మండీ నుండి సందేశం\n\n";
+  msg+="ప్రియమైన *"+tName+"* గారికి,\n";
+  msg+="(Transporter)\n\n";
+  if(vno&&vno!=="—")msg+="వాహనం: *"+vno+"*\n";
+  msg+="\n📊 *మీ రైతుల క్రేట్ల వివరాలు (బకాయి):*\n";
+  msg+="━━━━━━━━━━━━━━━\n";
+  farmers.forEach(function(f,i){
+    msg+=(i+1)+". 🌾 *"+f.name+"*\n";
+    msg+="   బకాయి క్రేట్లు: *"+f.qty+"*\n";
+    if(f.vehicleNo)msg+="   వాహనం: "+f.vehicleNo+"\n";
+    msg+="\n";
+  });
+  msg+="━━━━━━━━━━━━━━━\n";
+  msg+="📦 *మొత్తం బకాయి: "+total+" క్రేట్లు*\n\n";
+  msg+="మీరు పైన పేర్కొన్న రైతుల క్రేట్లను ";
+  msg+="వీలైనంత త్వరగా మండీకి తిరిగి ఇప్పించగలరు.\n\n";
+  msg+="📞 మండీ కార్యాలయం సంప్రదించండి.\n";
+  msg+="— CrateTrack Pro | Yuvisoft";
+  return msg;
+}
+// Transporter SMS (shorter for regular SMS)
+function buildTransporterSMS(tName,mName,farmers,vno,totalBal){
+  var total=totalBal||farmers.reduce(function(s,f){return s+f.qty;},0);
+  var msg=mName+" మండీ నుండి:\n";
+  msg+=tName+" గారికి,\n";
+  msg+="మీ రైతుల క్రేట్ల బకాయి:\n";
+  farmers.forEach(function(f){msg+=f.name+": "+f.qty+" క్రేట్లు\n";});
+  msg+="మొత్తం: "+total+" క్రేట్లు\n";
+  msg+="వీలైనంత త్వరగా తిరిగి ఇప్పించగలరు - CrateTrack";
+  return msg;
 }
 function sendMsgs(people,txns,mName,vno,onlyBal){
   var toSend=[];
@@ -277,7 +308,7 @@ function sendMsgs(people,txns,mName,vno,onlyBal){
 function getSlipHeader(mandiId){if(!DB.slipHeaders)DB.slipHeaders={};return DB.slipHeaders[mandiId]||DB.slipHeaders["default"]||{line1:"CrateTrack Pro",line2:"",line3:"",phone:"",address:""};}
 function getSlipHTML(vehicle,mandiId){
   var hdr=getSlipHeader(mandiId);var rate=vehicle.ratePerCrate||0;var charge=vehicle.totalIn*rate;
-  var h='<!DOCTYPE html><html><head><title>Slip '+vehicle.vehicleNo+'</title><style>@page{margin:2mm;size:80mm auto}*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Courier New",monospace;font-size:11px;width:76mm;padding:2mm 3mm;background:#fff;color:#000;line-height:1.4}.c{text-align:center}.b{font-weight:bold}.ln{border-top:1px solid #000;margin:4px 0}.dl{border-top:3px double #000;margin:5px 0}.ds{border-top:1px dashed #000;margin:4px 0}.row{display:flex;justify-content:space-between;margin:2px 0}table{width:100%;border-collapse:collapse;font-size:10px;margin:3px 0}th{border:1px solid #333;padding:2px 3px;text-align:left;font-size:9px;background:#eee}td{border:1px solid #aaa;padding:2px 3px}td.r{text-align:right}.tt td{font-weight:bold;background:#eee}.ob td{background:#fffde7}.cb{border:2px solid #000;padding:6px;margin:4px 0;font-size:10px}.cr{display:flex;justify-content:space-between;margin:2px 0}.ct{display:flex;justify-content:space-between;border-top:2px solid #000;margin-top:4px;padding-top:4px;font-size:13px;font-weight:bold}.sr{display:flex;justify-content:space-around;margin-top:14px}.sl{text-align:center;width:22mm}.sll{border-top:1px solid #000;margin-top:16px;padding-top:3px;font-size:8px}.ft{text-align:center;font-size:8px;color:#666;margin-top:8px;border-top:1px dashed #aaa;padding-top:4px}</style></head><body>';
+  var h='<!DOCTYPE html><html><head><title>Slip '+vehicle.vehicleNo+'</title><style>@page{margin:2mm;size:80mm auto}*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Courier New",monospace;font-size:11px;width:76mm;padding:2mm 3mm;background:#fff;color:#000;line-height:1.4}.c{text-align:center}.b{font-weight:bold}.ln{border-top:1px solid #000;margin:4px 0}.dl{border-top:3px double #000;margin:5px 0}.ds{border-top:1px dashed #000;margin:4px 0}.row{display:flex;justify-content:space-between;margin:2px 0}table{width:100%;border-collapse:collapse;font-size:10px;margin:3px 0}th{border:1px solid #333;padding:2px 3px;text-align:left;font-size:9px;background:#eee;white-space:nowrap}td{border:1px solid #aaa;padding:2px 3px}td.r{text-align:right}.tt td{font-weight:bold;background:#eee}.ob td{background:#fffde7}.cb{border:2px solid #000;padding:6px;margin:4px 0;font-size:10px}.cr{display:flex;justify-content:space-between;margin:2px 0}.ct{display:flex;justify-content:space-between;border-top:2px solid #000;margin-top:4px;padding-top:4px;font-size:13px;font-weight:bold}.sr{display:flex;justify-content:space-around;margin-top:14px}.sl{text-align:center;width:22mm}.sll{border-top:1px solid #000;margin-top:16px;padding-top:3px;font-size:8px}.ft{text-align:center;font-size:8px;color:#666;margin-top:8px;border-top:1px dashed #aaa;padding-top:4px}</style></head><body>';
   h+='<div class="c b" style="font-size:14px">'+(hdr.line1||"CrateTrack Pro")+'</div>';
   if(hdr.line2)h+='<div class="c" style="font-size:9px">'+hdr.line2+'</div>';
   if(hdr.line3)h+='<div class="c" style="font-size:9px">'+hdr.line3+'</div>';
@@ -434,6 +465,8 @@ function exportAllMandiLedgerCSV(){
 // ── RENDER ROOT ──
 function render(){
   stopPolling();
+  // Reload DB from storage to pick up changes from other tabs on same device
+  var fresh=loadDB();if(fresh&&fresh!==DB){DB=fresh;}
   saveDB();
   var app=document.getElementById("app");app.innerHTML="";
   var pg;
@@ -538,12 +571,12 @@ function buildLogin(){
   var errEl=mk("div","err-box");errEl.style.display="none";
   function doLogin(){
     var em=email.trim().toLowerCase();
-    if(DB.superAdmin.email&&DB.superAdmin.pw&&em===DB.superAdmin.email.toLowerCase()&&pw===DB.superAdmin.pw){SESSION={role:"superadmin"};render();return;}
-    if(DB.supervisors){for(var si=0;si<DB.supervisors.length;si++){var sv=DB.supervisors[si];if(sv.active&&sv.email.toLowerCase()===em&&sv.pw===pw){SESSION={role:"supervisor",supervisorId:sv.id,supervisorName:sv.name,assignedMandis:sv.assignedMandis||[]};render();return;}}}
+    if(DB.superAdmin.email&&DB.superAdmin.pw&&em===DB.superAdmin.email.toLowerCase()&&pw===DB.superAdmin.pw){SESSION={role:"superadmin"};saveSession();render();return;}
+    if(DB.supervisors){for(var si=0;si<DB.supervisors.length;si++){var sv=DB.supervisors[si];if(sv.active&&sv.email.toLowerCase()===em&&sv.pw===pw){SESSION={role:"supervisor",supervisorId:sv.id,supervisorName:sv.name,assignedMandis:sv.assignedMandis||[]};saveSession();render();return;}}}
     var mandi=(DB.mandis||[]).find(function(m){return m.adminEmail&&m.adminEmail.toLowerCase()===em&&m.adminPw===pw;});
-    if(mandi){if(mandi.status==="suspended"){errEl.textContent="⚠️ Account suspended.";errEl.style.display="block";return;}SESSION={role:"mandiadmin",mandiId:mandi.id,mandiName:mandi.name,maxEmp:mandi.maxEmp};maTab="writer";render();return;}
+    if(mandi){if(mandi.status==="suspended"){errEl.textContent="⚠️ Account suspended.";errEl.style.display="block";return;}SESSION={role:"mandiadmin",mandiId:mandi.id,mandiName:mandi.name,maxEmp:mandi.maxEmp};maTab="writer";saveSession();render();return;}
     var mids=Object.keys(DB.mandiData||{});
-    for(var m=0;m<mids.length;m++){var emps=(DB.mandiData[mids[m]].employees||[]);for(var e=0;e<emps.length;e++){var emp=emps[e];if(emp.loginEmail&&emp.loginEmail.toLowerCase()===em&&emp.loginPw===pw&&emp.active){var mn=(DB.mandis||[]).find(function(x){return x.id===mids[m];})||{};SESSION={role:"employee",mandiId:mids[m],mandiName:mn.name||"Mandi",empId:emp.id,empName:emp.name,empRoles:emp.roles||["writer"]};maTab=(emp.roles||["writer"])[0];render();return;}}}
+    for(var m=0;m<mids.length;m++){var emps=(DB.mandiData[mids[m]].employees||[]);for(var e=0;e<emps.length;e++){var emp=emps[e];if(emp.loginEmail&&emp.loginEmail.toLowerCase()===em&&emp.loginPw===pw&&emp.active){var mn=(DB.mandis||[]).find(function(x){return x.id===mids[m];})||{};SESSION={role:"employee",mandiId:mids[m],mandiName:mn.name||"Mandi",empId:emp.id,empName:emp.name,empRoles:emp.roles||["writer"]};maTab=(emp.roles||["writer"])[0];saveSession();render();return;}}}
     errEl.textContent="⚠️ Invalid credentials. Contact your administrator.";errEl.style.display="block";
   }
   var eInp=Inp("your@email.com","",function(v){email=v;errEl.style.display="none";});
@@ -604,7 +637,7 @@ function buildSA(){
   var page=mk("div","page");
   var tb=mk("div","topbar");
   var tL=mk("div","fx");var logo=mk("div",null,{background:T.orange,width:"34px",height:"34px",borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"17px",flexShrink:"0"});logo.textContent="📦";var lt=mk("div");var lt1=mk("div",null,{fontWeight:"800",fontSize:"14px"});lt1.textContent="CrateTrack — SUPER ADMIN";var lt2=mk("div",null,{color:"#6B7A99",fontSize:"10px"});lt2.textContent="Platform Control · Yuvisoft";ap(lt,lt1,lt2);ap(tL,logo,lt);
-  var tR=mk("div","fx");ap(tR,Btn("📱 New Device Setup","btn bt sm",function(){showNewDeviceSetup();}),Btn("⬇ Backup","btn bgh sm",function(){exportDBJSON();}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saTab="overview";render();}));
+  var tR=mk("div","fx");ap(tR,Btn("📱 New Device Setup","btn bt sm",function(){showNewDeviceSetup();}),Btn("⬇ Backup","btn bgh sm",function(){exportDBJSON();}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();saTab="overview";render();}));
   ap(tb,tL,tR);page.appendChild(tb);
   var tabBar=mk("div","tab-bar");var body=mk("div","bw");
   function setTab(k){saTab=k;tabBar.querySelectorAll(".tbtn").forEach(function(b){b.classList.toggle("on",b.dataset.k===k);});body.innerHTML="";if(saTab==="overview")renderOv();else if(saTab==="mandis")renderMandis();else if(saTab==="supervisors")renderSupervisors();else if(saTab==="revenue")renderRev();else renderBackup();}
@@ -645,7 +678,7 @@ function buildSA(){
 
 // ── SUPERVISOR PANEL ──
 function buildSupervisorPanel(){
-  var page=mk("div","page");var tb=mk("div","topbar");var tL=mk("div","fx");var logo=mk("div",null,{background:T.purple,width:"30px",height:"30px",borderRadius:"7px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"15px",flexShrink:"0"});logo.textContent="🔍";ap(tL,logo,mk("div",null,{fontWeight:"800",fontSize:"13px"})).textContent="Supervisor — "+SESSION.supervisorName;var tR=mk("div","fx");ap(tR,Btn("Sign Out","btn bgh sm",function(){SESSION=null;render();}));ap(tb,tL,tR);page.appendChild(tb);
+  var page=mk("div","page");var tb=mk("div","topbar");var tL=mk("div","fx");var logo=mk("div",null,{background:T.purple,width:"30px",height:"30px",borderRadius:"7px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"15px",flexShrink:"0"});logo.textContent="🔍";ap(tL,logo,mk("div",null,{fontWeight:"800",fontSize:"13px"})).textContent="Supervisor — "+SESSION.supervisorName;var tR=mk("div","fx");ap(tR,Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();render();}));ap(tb,tL,tR);page.appendChild(tb);
   var body=mk("div","bw");body.appendChild(mk("div",null,{fontWeight:"800",fontSize:"17px",marginBottom:"14px"})).textContent="Assigned Mandis";
   var mandis=(SESSION.assignedMandis||[]).map(function(mid){return (DB.mandis||[]).find(function(m){return m.id===mid;});}).filter(Boolean);
   if(!mandis.length)body.appendChild(mk("div","card")).textContent="No mandis assigned.";
@@ -697,7 +730,7 @@ function buildMandi(){
   var sovEl=mk("div",null,{color:T.red,fontWeight:"800",fontSize:"13px"});sovEl.id="_stat_out";sovEl.textContent=String(st.tOut);
   var si=mk("div",null,{textAlign:"center"});ap(si,sivEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="IN today";statsDiv.appendChild(si);
   var so=mk("div",null,{textAlign:"center"});ap(so,sovEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="OUT today";statsDiv.appendChild(so);
-  ap(tR,statsDiv,Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;maTab="writer";render();}));
+  ap(tR,statsDiv,Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();maTab="writer";render();}));
   ap(tb,tL,tR);page.appendChild(tb);
 
   var allTabs=[["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],["ledger","⚖️ Ledger"],["history","📋 History"],["dayrep","📊 Day Report"],["lotreg","🗂️ Lot Register"]];
@@ -711,7 +744,7 @@ function buildMandi(){
   });
   if(!tabs.find(function(t){return t[0]===maTab;}))maTab=tabs[0][0];
   var tabBar=mk("div","tab-bar");var body=mk("div","bw");
-  function setTab(k){maTab=k;tabBar.querySelectorAll(".tbtn").forEach(function(b){b.classList.toggle("on",b.dataset.k===k);});renderBody();}
+  function setTab(k){maTab=k;if(SESSION){SESSION.lastTab=k;saveSession();}tabBar.querySelectorAll(".tbtn").forEach(function(b){b.classList.toggle("on",b.dataset.k===k);});renderBody();}
   tabs.forEach(function(item){var b=mk("button","tbtn"+(maTab===item[0]?" on":""));b.dataset.k=item[0];b.textContent=item[1];b.onclick=function(){setTab(item[0]);};tabBar.appendChild(b);});
   ap(page,tabBar,body);
 
@@ -857,7 +890,27 @@ function buildMandi(){
     body.innerHTML="";body.appendChild(mk("div",null,{fontWeight:"800",fontSize:"17px",marginBottom:"4px"})).textContent="⚖️ Crate Balance Ledger";
     var ib=mk("div","info-box");ib.style.marginBottom="12px";ib.textContent="Balance = Total OUT − Total IN (all time). Positive = owes crates to mandi.";body.appendChild(ib);
     var allPpl=(MD.people||[]).filter(function(p){return p.active&&p.phone;});
-    var topRow=mk("div","fxw");topRow.style.marginBottom="12px";ap(topRow,Btn("📣 Send WA+SMS to All","btn bwa",function(){var n=sendMsgs(allPpl,MD.txns||[],mandi.name,"—",true);if(n>0)toast("Opening for "+n+" person(s)...");}));if(!isEmp||hasRole("supervisor"))topRow.appendChild(Btn("📤 Mass Upload","btn bpu",function(){showMassUpload(function(){renderLedger();});}));body.appendChild(topRow);
+    var topRow=mk("div","fxw");topRow.style.marginBottom="12px";ap(topRow,Btn("📣 Send WA+SMS to All","btn bwa",function(){// Send to farmers/buyers with balance via regular sendMsgs
+var regularPpl=allPpl.filter(function(p){return p.type!=="transporter";});
+var n=sendMsgs(regularPpl,MD.txns||[],mandi.name,"—",true);
+// Send to transporters with special farmer breakdown message
+var transporters=allPpl.filter(function(p){return p.type==="transporter"&&p.phone;});
+var tCount=0;
+transporters.forEach(function(pp2,tidx){
+  var tVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===pp2.id;});
+  var farmerMap={};
+  tVehicles.forEach(function(v){(v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){if(!farmerMap[l.personId])farmerMap[l.personId]={name:l.personName,qty:0,vehicleNo:v.vehicleNo};});});
+  var farmersWithBal=[];
+  Object.keys(farmerMap).forEach(function(pid){var fb=getBal(MD.txns||[],pid);if(fb.balance>0)farmersWithBal.push({name:farmerMap[pid].name,qty:fb.balance,vehicleNo:farmerMap[pid].vehicleNo});});
+  if(!farmersWithBal.length)return;
+  var tTotal=farmersWithBal.reduce(function(s,f){return s+f.qty;},0);
+  tCount++;
+  var delay=(n+tidx)*900;
+  setTimeout(function(){window.open("https://wa.me/91"+pp2.phone+"?text="+encodeURIComponent(buildTransporterWA(pp2.name,mandi.name,farmersWithBal,"—",tTotal)),"_blank");},delay);
+  setTimeout(function(){window.open("sms:"+pp2.phone+"?body="+encodeURIComponent(buildTransporterSMS(pp2.name,mandi.name,farmersWithBal,"—",tTotal)),"_blank");},delay+500);
+});
+if(n>0||tCount>0)toast("Opening WA+SMS for "+(n+tCount)+" person(s) (incl. "+tCount+" transporters)...");
+else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))topRow.appendChild(Btn("📤 Mass Upload","btn bpu",function(){showMassUpload(function(){renderLedger();});}));body.appendChild(topRow);
     var fc=mk("div","card");var fg=mk("div","ga");fg.style.marginBottom="8px";var fType="all",fSearch="",fBal="all";
     fg.appendChild(Fld("TYPE",Sel("all",[["all","All"],["farmer","🌾 Farmers"],["buyer","🏪 Buyers"],["transporter","🚛 Transporters"]],function(v){fType=v;refreshLedger();})));fg.appendChild(Fld("BALANCE",Sel("all",[["all","All"],["pending","Has Balance"],["clear","Clear"]],function(v){fBal=v;refreshLedger();})));fg.appendChild(Fld("SEARCH",Inp("Name / Phone...","",function(v){fSearch=v;refreshLedger();})));
     var cntEl=mk("div",null,{fontSize:"11px",color:T.muted,marginTop:"6px"});cntEl.textContent="—";var dlRow=mk("div","fxb");dlRow.style.marginTop="8px";dlRow.appendChild(cntEl);dlRow.appendChild(Btn("⬇ Export CSV","btn bp sm",function(){var rows=[];(MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){var b=getBal(MD.txns||[],p.id);rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);});dlCSV(rows,["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"],"ledger-"+today()+".csv");}));ap(fc,fg,dlRow);body.appendChild(fc);var listDiv=mk("div");body.appendChild(listDiv);
@@ -875,13 +928,46 @@ function buildMandi(){
           var brow=mk("div",null,{display:"flex",justifyContent:"space-around",background:T.bg,borderRadius:"8px",padding:"8px 4px",marginBottom:"8px"});[["OUT",b.totalOut,T.red],["IN",b.totalIn,T.green],["BAL",b.balance,b.balance>50?T.red:b.balance>0?T.gold:T.green]].forEach(function(item){var d=mk("div",null,{textAlign:"center"});ap(d,mk("div",null,{fontWeight:"800",fontSize:item[0]==="BAL"?"20px":"14px",color:item[2]})).textContent=String(item[1]);ap(d,mk("div",null,{fontSize:"8px",color:T.muted,marginTop:"1px"})).textContent=item[0];brow.appendChild(d);});c.appendChild(brow);
           var acts=mk("div","fx");
           if(p.phone)acts.appendChild(Btn("📱 WA+SMS","btn bwa sm",function(pp2){return function(){
-            // FIX 7: transporter gets special WA with farmer details
+            // Transporter: show ALL farmers with pending balance (all-time), WA + SMS
             if(pp2.type==="transporter"){
-              var todayVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===pp2.id&&v.date===today();});
-              var farmers=[];todayVehicles.forEach(function(v){(v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){var ex=farmers.find(function(f){return f.personId===l.personId;});if(ex)ex.qty+=l.qty;else farmers.push({personId:l.personId,name:l.personName,qty:l.qty});});});
-              var vno=todayVehicles.map(function(v){return v.vehicleNo;}).join(", ")||"—";
-              if(farmers.length){window.open("https://wa.me/91"+pp2.phone+"?text="+encodeURIComponent(buildTransporterWA(pp2.name,mandi.name,farmers,vno)),"_blank");}
-              else sendMsgs([pp2],MD.txns||[],mandi.name,"—",false);
+              // Collect all vehicles ever handled by this transporter
+              var tVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===pp2.id;});
+              // For each farmer that rode with this transporter, compute their all-time pending balance
+              var farmerMap={};
+              tVehicles.forEach(function(v){
+                (v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){
+                  if(!farmerMap[l.personId]){
+                    farmerMap[l.personId]={personId:l.personId,name:l.personName,vehicleNos:[],qty:0};
+                  }
+                  if(farmerMap[l.personId].vehicleNos.indexOf(v.vehicleNo)<0)
+                    farmerMap[l.personId].vehicleNos.push(v.vehicleNo);
+                });
+              });
+              // Compute all-time balance per farmer
+              var farmersWithBal=[];
+              Object.keys(farmerMap).forEach(function(pid){
+                var fb=getBal(MD.txns||[],pid);
+                if(fb.balance>0){
+                  farmersWithBal.push({
+                    personId:pid,
+                    name:farmerMap[pid].name,
+                    qty:fb.balance,
+                    vehicleNo:farmerMap[pid].vehicleNos.slice(-1)[0]||"—"
+                  });
+                }
+              });
+              // Total balance = sum of all farmers' pending crates via this transporter
+              var tTotal=farmersWithBal.reduce(function(s,f){return s+f.qty;},0);
+              if(!pp2.phone){toast("Transporter has no phone number","warn");return;}
+              if(!farmersWithBal.length){toast("No pending balances for "+pp2.name+"'s farmers","warn");return;}
+              // Send WA
+              var waMsg=buildTransporterWA(pp2.name,mandi.name,farmersWithBal,"—",tTotal);
+              window.open("https://wa.me/91"+pp2.phone+"?text="+encodeURIComponent(waMsg),"_blank");
+              // Send SMS after short delay (feasibility: sms: URI opens native SMS app)
+              setTimeout(function(){
+                var smsMsg=buildTransporterSMS(pp2.name,mandi.name,farmersWithBal,"—",tTotal);
+                window.open("sms:"+pp2.phone+"?body="+encodeURIComponent(smsMsg),"_blank");
+              },1200);
             } else sendMsgs([pp2],MD.txns||[],mandi.name,"—",false);
           };}(p)));
           acts.appendChild(Btn("✏️ Edit","btn bgh sm",function(pp2){return function(){showEditPersonModal(pp2,function(){renderLedger();});};}(p)));acts.appendChild(Btn("History","btn bgp sm",function(pp2){return function(){showPersonHistory(pp2);};}(p)));c.appendChild(acts);
