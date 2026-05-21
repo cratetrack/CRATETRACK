@@ -384,7 +384,7 @@ function sendMsgs(people,txns,mName,vno,onlyBal){
 function getSlipHeader(mandiId){if(!DB.slipHeaders)DB.slipHeaders={};return DB.slipHeaders[mandiId]||DB.slipHeaders["default"]||{line1:"CrateTrack Pro",line2:"",line3:"",phone:"",address:""};}
 function getSlipHTML(vehicle,mandiId){
   var hdr=getSlipHeader(mandiId);var rate=vehicle.ratePerCrate||0;var charge=vehicle.totalIn*rate;
-  var h='<!DOCTYPE html><html><head><title>Slip '+vehicle.vehicleNo+'</title><style>@page{margin:2mm;size:80mm auto}*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Courier New",monospace;font-size:11px;width:76mm;padding:2mm 3mm;background:#fff;color:#000;line-height:1.4}.c{text-align:center}.b{font-weight:bold}.ln{border-top:1px solid #000;margin:4px 0}.dl{border-top:3px double #000;margin:5px 0}.ds{border-top:1px dashed #000;margin:4px 0}.row{display:flex;justify-content:space-between;margin:2px 0}table{width:100%;border-collapse:collapse;font-size:10px;margin:3px 0}th{border:1px solid #333;padding:2px 3px;text-align:left;font-size:9px;background:#eee;white-space:nowrap}td{border:1px solid #aaa;padding:2px 3px}td.r{text-align:right}.tt td{font-weight:bold;background:#eee}.ob td{background:#fffde7}.cb{border:2px solid #000;padding:6px;margin:4px 0;font-size:10px}.cr{display:flex;justify-content:space-between;margin:2px 0}.ct{display:flex;justify-content:space-between;border-top:2px solid #000;margin-top:4px;padding-top:4px;font-size:13px;font-weight:bold}.sr{display:flex;justify-content:space-around;margin-top:14px}.sl{text-align:center;width:22mm}.sll{border-top:1px solid #000;margin-top:16px;padding-top:3px;font-size:8px}.ft{text-align:center;font-size:8px;color:#666;margin-top:8px;border-top:1px dashed #aaa;padding-top:4px}</style></head><body>';
+  var h='<!DOCTYPE html><html><head><title>Slip '+vehicle.vehicleNo+'</title><style>@page{margin:2mm;size:80mm auto}*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Courier New",monospace;font-size:11px;width:76mm;padding:2mm 3mm;background:#fff;color:#000;line-height:1.4}.c{text-align:center}.b{font-weight:bold}.ln{border-top:1px solid #000;margin:4px 0}.dl{border-top:3px double #000;margin:5px 0}.ds{border-top:1px dashed #000;margin:4px 0}.row{display:flex;justify-content:space-between;margin:2px 0}table{width:100%;border-collapse:collapse;font-size:10px;margin:3px 0;border:1px solid #333}th{border:1px solid #333;padding:2px 3px;text-align:left;font-size:9px;background:#eee;white-space:nowrap}td{border:1px solid #aaa;padding:2px 3px}td.r{text-align:right}.tt td{font-weight:bold;background:#eee;border-top:2px solid #333}.ob td{background:#fffde7}.cb{border:2px solid #000;padding:6px;margin:4px 0;font-size:10px}.cr{display:flex;justify-content:space-between;margin:2px 0}.ct{display:flex;justify-content:space-between;border-top:2px solid #000;margin-top:4px;padding-top:4px;font-size:13px;font-weight:bold}.sr{display:flex;justify-content:space-around;margin-top:14px}.sl{text-align:center;width:22mm}.sll{border-top:1px solid #000;margin-top:16px;padding-top:3px;font-size:8px}.ft{text-align:center;font-size:8px;color:#666;margin-top:8px;border-top:1px dashed #aaa;padding-top:4px}</style></head><body>';
   h+='<div class="c b" style="font-size:14px">'+(hdr.line1||"CrateTrack Pro")+'</div>';
   if(hdr.line2)h+='<div class="c" style="font-size:9px">'+hdr.line2+'</div>';
   if(hdr.line3)h+='<div class="c" style="font-size:9px">'+hdr.line3+'</div>';
@@ -596,31 +596,36 @@ async function pushToCloud(){
 }
 
 async function pullFromCloud(){
-  var url = getFbUrl(); if(!url || isFileProtocol()) return false;
+  var url=getFbUrl();if(!url||isFileProtocol())return false;
   try{
-    var resp = await fetch(url+"/cratetrack.json",{cache:"no-store"});
-    if(!resp.ok) return false;
-    var data = await resp.json();
-    if(!data||!data.db||!data.db.superAdmin) return false;
-    if(data.ts && data.ts <= SYNC_LAST_TS) return false;
-    SYNC_LAST_TS = data.ts||Date.now();
-    var r = migrateDB(data.db);
-    // Merge: keep whichever side has more records per mandi
-    var mids = Array.from(new Set(
-      Object.keys(DB.mandiData||{}).concat(Object.keys(r.mandiData||{}))
-    ));
+    var resp=await fetch(url+"/cratetrack.json",{cache:"no-store"});
+    if(!resp.ok)return false;
+    var data=await resp.json();
+    if(!data||!data.db||!data.db.superAdmin)return false;
+    if(data.ts&&data.ts<=SYNC_LAST_TS)return false;
+    // Never accept remote data that reduces local records
+    var rMC=(data.db.mandis||[]).length,lMC=(DB.mandis||[]).length;
+    var rTC=Object.values(data.db.mandiData||{}).reduce(function(s,m){return s+(m.txns||[]).length;},0);
+    var lTC=Object.values(DB.mandiData||{}).reduce(function(s,m){return s+(m.txns||[]).length;},0);
+    if(lMC>rMC&&rTC===0)return false;
+    SYNC_LAST_TS=data.ts||Date.now();
+    var r=migrateDB(data.db);
+    var mids=Array.from(new Set(Object.keys(DB.mandiData||{}).concat(Object.keys(r.mandiData||{}))));
     mids.forEach(function(mid){
-      var L=(DB.mandiData||{})[mid], R=(r.mandiData||{})[mid];
-      if(!R||!L) return;
-      if((L.txns||[]).length     > (R.txns||[]).length)      R.txns     =L.txns;
-      if((L.vehicles||[]).length > (R.vehicles||[]).length)  R.vehicles =L.vehicles;
-      if((L.people||[]).length   > (R.people||[]).length)    R.people   =L.people;
-      if((L.employees||[]).length> (R.employees||[]).length) R.employees=L.employees;
+      var L=(DB.mandiData||{})[mid],R=(r.mandiData||{})[mid];
+      if(!R){if(!r.mandiData)r.mandiData={};r.mandiData[mid]=L;return;}
+      if(!L)return;
+      if((L.txns||[]).length>(R.txns||[]).length)R.txns=L.txns;
+      if((L.vehicles||[]).length>(R.vehicles||[]).length)R.vehicles=L.vehicles;
+      if((L.people||[]).length>(R.people||[]).length)R.people=L.people;
+      if((L.employees||[]).length>(R.employees||[]).length)R.employees=L.employees;
     });
-    DB = r;
+    if((DB.mandis||[]).length>(r.mandis||[]).length)r.mandis=DB.mandis;
+    if((DB.supervisors||[]).length>(r.supervisors||[]).length)r.supervisors=DB.supervisors;
+    DB=r;
     try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
     return true;
-  }catch(e){ return false; }
+  }catch(e){return false;}
 }
 
 function startCloudSync(){
@@ -772,9 +777,7 @@ function showCloudSyncSetup(onDone){
 
 function render(){
   stopPolling();
-  // Reload DB from storage to pick up changes from other tabs on same device
-  var fresh=loadDB();if(fresh&&fresh!==DB){DB=fresh;}
-  saveDB();
+  var fresh=loadDB();if(fresh){DB=fresh;}
   var app=document.getElementById("app");app.innerHTML="";
   var pg;
   // First-run: if superAdmin has no credentials AND no Firebase URL set,
@@ -1257,6 +1260,19 @@ function buildMandi(){
         saveDB();updateTopbarStats();
         var lp=[];(vehicle.lots||[]).forEach(function(l){if(!lp.find(function(x){return x.id===l.personId;})){var p=(MD.people||[]).find(function(x){return x.id===l.personId;});if(p)lp.push(p);}});
         sendMsgs(lp,MD.txns,mandi.name,vehicle.vehicleNo,false);
+        if(vehicle.transporterId){
+          var _trn=(MD.people||[]).find(function(p){return p.id===vehicle.transporterId;});
+          if(_trn&&_trn.phone){
+            var _tBal=getTransporterBal(MD.txns,MD.vehicles||[],_trn.id);
+            if(_tBal.farmers&&_tBal.farmers.length){
+              var _tF=_tBal.farmers.map(function(f){return {name:f.name,qty:f.balance};});
+              setTimeout(function(){
+                window.open("https://wa.me/91"+_trn.phone+"?text="+encodeURIComponent(buildTransporterWA(_trn.name,mandi.name,_tF,"—",_tBal.balance)),"_blank");
+                setTimeout(function(){window.open("sms:"+_trn.phone+"?body="+encodeURIComponent(buildTransporterSMS(_trn.name,mandi.name,_tF,"—",_tBal.balance)),"_blank");},1200);
+              },2400);
+            }
+          }
+        }
         ov.remove();renderBody();toast("OUT confirmed!");
       }));con.appendChild(acts);ap(box,hdr,con);ov.appendChild(box);
     }rebuild();
@@ -1288,11 +1304,11 @@ if(n>0||tCount>0)toast("Opening WA+SMS for "+(n+tCount)+" person(s) (incl. "+tCo
 else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))topRow.appendChild(Btn("📤 Mass Upload","btn bpu",function(){showMassUpload(function(){renderLedger();});}));body.appendChild(topRow);
     var fc=mk("div","card");var fg=mk("div","ga");fg.style.marginBottom="8px";var fType="all",fSearch="",fBal="all";
     fg.appendChild(Fld("TYPE",Sel("all",[["all","All"],["farmer","🌾 Farmers"],["buyer","🏪 Buyers"],["transporter","🚛 Transporters"]],function(v){fType=v;refreshLedger();})));fg.appendChild(Fld("BALANCE",Sel("all",[["all","All"],["pending","Has Balance"],["clear","Clear"]],function(v){fBal=v;refreshLedger();})));fg.appendChild(Fld("SEARCH",Inp("Name / Phone...","",function(v){fSearch=v;refreshLedger();})));
-    var cntEl=mk("div",null,{fontSize:"11px",color:T.muted,marginTop:"6px"});cntEl.textContent="—";var dlRow=mk("div","fxb");dlRow.style.marginTop="8px";dlRow.appendChild(cntEl);dlRow.appendChild(Btn("⬇ Export CSV","btn bp sm",function(){var rows=[];(MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){var b=getBal(MD.txns||[],p.id);rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);});dlCSV(rows.sort(function(a,b){
-  // Sort: transporters first, then by type, then by name
-  if(a[1]!==b[1]){var order={transporter:0,buyer:1,farmer:2};return (order[a[1]]||9)-(order[b[1]]||9);}
-  return String(a[0]).localeCompare(String(b[0]));
-}),["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"],"ledger-"+today()+".csv");}));ap(fc,fg,dlRow);body.appendChild(fc);var listDiv=mk("div");body.appendChild(listDiv);
+    var cntEl=mk("div",null,{fontSize:"11px",color:T.muted,marginTop:"6px"});cntEl.textContent="—";var dlRow=mk("div","fxb");dlRow.style.marginTop="8px";dlRow.appendChild(cntEl);dlRow.appendChild(Btn("⬇ Export CSV","btn bp sm",function(){var rows=[];(MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){var b=getBal(MD.txns||[],p.id);rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);});var filtRows=(fType&&fType!=="all")?rows.filter(function(r){return r[1]===fType;}):rows;
+      dlCSV(filtRows.sort(function(a,b){
+        if(a[1]!==b[1]){var ord={transporter:0,buyer:1,farmer:2};return (ord[a[1]]||9)-(ord[b[1]]||9);}
+        return String(a[0]).localeCompare(String(b[0]));
+      }),["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"],"ledger-"+(fType||"all")+"-"+today()+".csv");}));ap(fc,fg,dlRow);body.appendChild(fc);var listDiv=mk("div");body.appendChild(listDiv);
     function refreshLedger(){
       var people=(MD.people||[]).filter(function(p){return p.active;});if(fType!=="all")people=people.filter(function(p){return p.type===fType;});if(fSearch){var s=fSearch.toLowerCase();people=people.filter(function(p){return p.name.toLowerCase().indexOf(s)>=0||(p.phone||"").indexOf(s)>=0;});}if(fBal==="pending")people=people.filter(function(p){return (p.type==="transporter"?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id)).balance>0;});if(fBal==="clear")people=people.filter(function(p){return (p.type==="transporter"?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id)).balance<=0;});
       cntEl.textContent="Showing "+people.length+" of "+(MD.people||[]).filter(function(p){return p.active;}).length;listDiv.innerHTML="";
@@ -1387,14 +1403,18 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
   function showEditTxn(txn,onDone){
     var qty=txn.qty,note=txn.editNote||txn.note||"",dir=txn.dir,date_=txn.date;var con=mk("div");
     var ib=mk("div","warn-box");ib.style.marginBottom="12px";ib.innerHTML="⚠️ Changes are audit-stamped with before/after values.<br><strong>Original:</strong> "+txn.dir+" "+txn.qty+" crates by "+(txn.enteredBy||"—")+" @ "+(txn.enteredAt||"—");con.appendChild(ib);
-    con.appendChild(Fld("DIRECTION",Sel(dir,[["IN","IN"],["OUT","OUT"]],function(v){dir=v;})));con.appendChild(Fld("QUANTITY",Inp("Qty",String(qty),function(v){qty=parseInt(v)||0;},"number","inp-big")));con.appendChild(Fld("DATE",Inp("Date",date_,function(v){date_=v;})));con.appendChild(Fld("REASON FOR EDIT *",Inp("Reason / note...",note,function(v){note=v;})));
+    con.appendChild(Fld("QUANTITY",Inp("Qty",String(qty),function(v){qty=parseInt(v)||0;},"number","inp-big")));con.appendChild(Fld("DATE",Inp("Date",date_,function(v){date_=v;})));con.appendChild(Fld("REASON FOR EDIT *",Inp("Reason / note...",note,function(v){note=v;})));
     con.appendChild(Btn("💾 Save Edit","btn bp full",function(){
       if(qty<=0){toast("Valid quantity required","err");return;}if(!note.trim()){toast("Reason required","err");return;}
       var by=currentUser();var at=nowStamp();
       MD.txns=MD.txns.map(function(t){return t.id===txn.id?Object.assign({},t,{qty:qty,dir:dir,date:date_,editNote:note,lastEditedBy:by,lastEditedAt:at,prevDir:t.prevDir||t.dir,prevQty:t.prevQty||t.qty,enteredBy:t.enteredBy||by,enteredAt:t.enteredAt||at}):t;});
       // FIX 2: Also update vehicle lot qty to sync slip
-      MD.vehicles=MD.vehicles.map(function(v){
-        if(v.vehicleNo===txn.vehicleNo){var newLots=(v.lots||[]).map(function(l){return (l.lotNo===txn.lotNo||l.globalLotNo===txn.globalLotNo)?Object.assign({},l,{qty:qty}):l;});var newTotal=newLots.reduce(function(s,l){return s+l.qty;},0);return Object.assign({},v,{lots:newLots,totalIn:newTotal,editedBy:by,editedAt:at});}return v;});
+      // Only update vehicle.lots for IN txns (slip uses IN data)
+      if(txn.dir==="IN"){
+        MD.vehicles=MD.vehicles.map(function(v){
+          if(v.vehicleNo===txn.vehicleNo){var newLots=(v.lots||[]).map(function(l){return (l.lotNo===txn.lotNo||l.globalLotNo===txn.globalLotNo)?Object.assign({},l,{qty:qty}):l;});var newTotal=newLots.reduce(function(s,l){return s+l.qty;},0);return Object.assign({},v,{lots:newLots,totalIn:newTotal,editedBy:by,editedAt:at});}return v;
+        });
+      }
       saveDB();updateTopbarStats();closeModals();if(onDone)onDone();
       var vehicle=(MD.vehicles||[]).find(function(v){return v.vehicleNo===txn.vehicleNo;});
       if(vehicle){var pc=mk("div");var pm=mk("div","info-box");pm.style.marginBottom="12px";pm.textContent="Transaction updated & slip synced. Reprint?";pc.appendChild(pm);pc.appendChild(Btn("🖨 Print Updated Slip","btn bt full",function(){closeModals();printSlip(vehicle,mandiId);}));openModal("Edit Saved — Reprint?",pc,false);}else toast("Transaction updated (audit-stamped)");}));
