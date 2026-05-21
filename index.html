@@ -777,13 +777,48 @@ function render(){
   saveDB();
   var app=document.getElementById("app");app.innerHTML="";
   var pg;
-  // First-run: if superAdmin has no credentials, show setup screen
-  if(!DB.superAdmin||!DB.superAdmin.email||!DB.superAdmin.pw){pg=buildFirstRun();}
-  else if(!SESSION)pg=buildLogin();
+  // First-run: if superAdmin has no credentials AND no Firebase URL set,
+  // check if we can pull from Firebase first (mobile joining existing setup)
+  if(!DB.superAdmin||!DB.superAdmin.email||!DB.superAdmin.pw){
+    if(getFbUrl()&&!isFileProtocol()){
+      // We have a Firebase URL — try to pull before showing first-run
+      pullFromCloud().then(function(pulled){
+        if(pulled&&DB.superAdmin&&DB.superAdmin.email){
+          // Got data from Firebase — re-render without first-run
+          render();
+        }
+        // else show first-run below (already appended)
+      });
+      // Show loading while pulling
+      pg=buildFirebasePullWait();
+    } else {
+      pg=buildFirstRun();
+    }
+  } else if(!SESSION)pg=buildLogin();
   else if(SESSION.role==="superadmin")pg=buildSA();
   else if(SESSION.role==="supervisor")pg=buildSupervisorPanel();
   else pg=buildMandi();
   app.appendChild(pg);
+}
+
+// ══ FIREBASE PULL WAIT (shown while pulling on new device) ══
+function buildFirebasePullWait(){
+  var wrap=mk("div","login-wrap");
+  var box=mk("div","card");box.style.cssText="max-width:400px;width:100%;border-radius:16px;padding:36px;text-align:center";
+  var icon=mk("div");icon.style.cssText="font-size:48px;margin-bottom:16px";icon.textContent="☁️";
+  var title=mk("div");title.style.cssText="font-weight:900;font-size:20px;margin-bottom:8px";title.textContent="Loading your data...";
+  var sub=mk("div");sub.style.cssText="color:#6B7A99;font-size:13px;margin-bottom:24px";sub.textContent="Connecting to cloud sync. This takes a few seconds.";
+  var spin=mk("div");spin.style.cssText="width:40px;height:40px;border:3px solid #E4E9F0;border-top-color:#4F6AF0;border-radius:50%;margin:0 auto;animation:spin 1s linear infinite";
+  var style=document.createElement("style");style.textContent="@keyframes spin{to{transform:rotate(360deg)}}";document.head.appendChild(style);
+  ap(box,icon,title,sub,spin);
+  // Fallback: if pull takes too long, show first-run
+  var fbNote=mk("div");fbNote.style.cssText="color:#94A3B8;font-size:11px;margin-top:20px";fbNote.textContent="Taking too long? Check your internet connection.";box.appendChild(fbNote);
+  var fallbackBtn=mk("div");fallbackBtn.style.cssText="margin-top:12px";
+  setTimeout(function(){
+    fallbackBtn.appendChild(Btn("Set up as new device instead","btn bgh sm",function(){saveFbUrl("");render();}));
+    box.appendChild(fallbackBtn);
+  },6000);
+  wrap.appendChild(box);return wrap;
 }
 
 // ══ FIRST-RUN SETUP ══
@@ -795,7 +830,7 @@ function buildFirstRun(){
     if(pw.length<8){errEl.textContent="Password must be at least 8 characters";errEl.style.display="block";return;}
     if(pw!==confirmPw){errEl.textContent="Passwords do not match";errEl.style.display="block";return;}
     DB.superAdmin={email:email.trim().toLowerCase(),pw:pw};
-    saveDB();
+    saveDB(); // this triggers pushToCloud automatically if Firebase URL is set
     // Generate device setup code for other devices
     var setupData={v:1,sa:{e:email.trim().toLowerCase(),p:pw}};
     var setupCode=btoa(JSON.stringify(setupData));
@@ -824,8 +859,31 @@ function buildFirstRun(){
   var pInp=Inp("Min 8 characters","",function(v){pw=v;errEl.style.display="none";},"password");
   var cInp=Inp("Confirm password","",function(v){confirmPw=v;errEl.style.display="none";},"password");
   cInp.addEventListener("keydown",function(e){if(e.key==="Enter")doSetup();});
+  // If user pastes a Firebase URL here, we pull from cloud instead of fresh setup
   var wrap=mk("div","login-wrap");
   var box=mk("div","card");box.style.cssText="max-width:420px;width:100%;border-radius:16px;padding:28px";
+
+  // Quick-join panel for existing setups
+  var joinPanel=mk("div",null,{background:"#EEF1FE",border:"1px solid #C7D2FE",borderRadius:"12px",padding:"16px",marginBottom:"20px"});
+  var jt=mk("div",null,{fontWeight:"800",fontSize:"14px",color:"#3730A3",marginBottom:"6px"});jt.textContent="📱 Already have CrateTrack on another device?";joinPanel.appendChild(jt);
+  var js=mk("div",null,{fontSize:"12px",color:"#6B7A99",marginBottom:"10px"});js.textContent="Paste your Firebase URL below to load your existing data automatically — no need to set up again.";joinPanel.appendChild(js);
+  var jUrl="";
+  var jInp=Inp("https://your-project-default-rtdb.firebaseio.com","",function(v){jUrl=v.trim();});
+  joinPanel.appendChild(Fld("FIREBASE URL",jInp));
+  joinPanel.appendChild(Btn("Load Existing Data →","btn bp full",async function(){
+    var url=jUrl.replace(/\/+$/,"").trim();
+    if(!url||!url.includes("firebase")){alert("Please paste your Firebase Database URL");return;}
+    saveFbUrl(url);
+    var pulled=await pullFromCloud();
+    if(pulled&&DB.superAdmin&&DB.superAdmin.email){
+      render();toast("✅ Data loaded from cloud!");
+    }else{
+      saveFbUrl("");
+      alert("Could not load data. Check the Firebase URL and make sure internet is working.");
+    }
+  }));
+  box.appendChild(joinPanel);
+
   var logo=mk("div");logo.style.cssText="text-align:center;margin-bottom:24px";
   var li=mk("div");li.style.cssText="background:#F97316;width:60px;height:60px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px";li.textContent="📦";
   var lt=mk("div");lt.style.cssText="font-weight:900;font-size:24px";lt.textContent="CrateTrack Pro";
