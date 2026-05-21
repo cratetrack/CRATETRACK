@@ -91,6 +91,27 @@ function getBal(txns,pid){
   var inp=mine.filter(function(t){return t.dir==="IN";}).reduce(function(s,t){return s+t.qty;},0);
   return {totalOut:out,totalIn:inp,balance:Math.max(0,out-inp)};
 }
+// Transporter balance = sum of all their farmers' pending crate balances
+function getTransporterBal(txns,vehicles,transporterId){
+  var tVehicles=(vehicles||[]).filter(function(v){return v.transporterId===transporterId;});
+  var farmerMap={};
+  tVehicles.forEach(function(v){
+    (v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){
+      if(!farmerMap[l.personId])farmerMap[l.personId]={name:l.personName,totalOut:0,totalIn:0,balance:0};
+    });
+  });
+  Object.keys(farmerMap).forEach(function(pid){
+    var fb=getBal(txns,pid);
+    farmerMap[pid].totalOut=fb.totalOut;
+    farmerMap[pid].totalIn=fb.totalIn;
+    farmerMap[pid].balance=fb.balance;
+  });
+  var totalBal=Object.values(farmerMap).reduce(function(s,f){return s+f.balance;},0);
+  var totalOut=Object.values(farmerMap).reduce(function(s,f){return s+f.totalOut;},0);
+  var totalIn=Object.values(farmerMap).reduce(function(s,f){return s+f.totalIn;},0);
+  var farmers=Object.keys(farmerMap).map(function(pid){return Object.assign({personId:pid},farmerMap[pid]);}).filter(function(f){return f.balance>0;});
+  return {totalOut:totalOut,totalIn:totalIn,balance:totalBal,farmers:farmers};
+}
 // ── FIX 4: Global sequential lot number per mandi per day ──
 function getNextLotNo(MD,date_,pendingLots){
   // Lot numbers are sequential across the entire mandi for the day
@@ -164,8 +185,59 @@ function loadDB(){
   return null;
 }
 function exportDBJSON(){
+  // Full JSON backup (for restore)
   var blob=new Blob([JSON.stringify(DB,null,2)],{type:"application/json"});
-  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="cratetrack-backup-"+today()+".json";a.click();toast("Backup downloaded!");
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="cratetrack-full-backup-"+today()+".json";a.click();toast("Full JSON backup downloaded (for restore)!");
+}
+function formatDateDDMMYYYY(d){
+  var dt=d?new Date(d):new Date();
+  var dd=String(dt.getDate()).padStart(2,"0");
+  var mm=String(dt.getMonth()+1).padStart(2,"0");
+  var yyyy=dt.getFullYear();
+  return dd+mm+yyyy;
+}
+function exportMandiAsCSV(mandi,MD,mode){
+  // mode: "transactions" or "ledger"
+  var safeMandiName=mandi.name.replace(/[^a-zA-Z0-9]/g,"-");
+  var dateStr=formatDateDDMMYYYY();
+  var fname=safeMandiName+"-backup-"+dateStr+".csv";
+  var q=function(v){return '"'+String(v==null?"":v).replace(/"/g,'""')+'"';};
+  var rows=[];var headers=[];
+  if(mode==="ledger"){
+    headers=["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"];
+    (MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){
+      var b=(p.type==="transporter")?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id);
+      rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);
+    });
+  } else {
+    // Transactions: IN first by lot, then OUT by lot
+    headers=["Date","Time","Vehicle","LotNo","Direction","Type","Person","Qty","Box","Note","EnteredBy"];
+    var txns=(MD.txns||[]).filter(function(t){return mode==="all"||t.date===today();});
+    txns.slice().sort(function(a,b){
+      if(a.dir!==b.dir)return a.dir==="IN"?-1:1;
+      return (a.globalLotNo||a.lotNo||999)-(b.globalLotNo||b.lotNo||999);
+    }).forEach(function(t){
+      rows.push([t.date,t.time,t.vehicleNo||"",t.globalLotNo||t.lotNo||"",t.dir,t.personType,t.personName,t.qty,t.isOther?"Other":"Ours",t.note||"",t.enteredBy||""]);
+    });
+  }
+  var csv=[headers.map(q).join(",")].concat(rows.map(function(r){return r.map(q).join(",");})).join("\n");
+  var blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fname;a.click();
+}
+function exportAllMandiBackup(mode){
+  var mandis=DB.mandis||[];
+  if(!mandis.length){toast("No mandis found","warn");return;}
+  var count=0;
+  mandis.forEach(function(m,idx){
+    var MD=DB.mandiData&&DB.mandiData[m.id];
+    if(!MD)return;
+    var txns=MD.txns||[];
+    if(!txns.length&&!(MD.people||[]).length)return;
+    setTimeout(function(){exportMandiAsCSV(m,MD,mode);},idx*1000);
+    count++;
+  });
+  if(count)toast("Downloading "+count+" CSV file(s) — one per mandi...");
+  else toast("No data found","warn");
 }
 function importDBJSON(file,cb){
   var r=new FileReader();
@@ -186,9 +258,13 @@ function buildInitial(){
 }
 
 var DB=loadDB()||buildInitial();
-var SESSION=(function(){try{var s=localStorage.getItem("ct_session");if(s){var d=JSON.parse(s);// Validate session still matches current DB credentials
+var SESSION=(function(){try{var s=localStorage.getItem("ct_session");if(s){var d=JSON.parse(s);
+// If SA was navigating into a mandi (fromSA=true), restore them as SA on refresh
+if(d.role==="mandiadmin"&&d.fromSA===true&&DB.superAdmin&&DB.superAdmin.email){return {role:"superadmin"};}
+if(d.role==="mandiadmin"&&d.fromSupervisor===true&&(DB.supervisors||[]).find(function(sv){return sv.id===d.supervisorId;})){return {role:"supervisor",supervisorId:d.supervisorId,supervisorName:d.supervisorName,assignedMandis:d.assignedMandis||[]};}
+// Normal validation
 if(d.role==="superadmin"&&DB.superAdmin&&DB.superAdmin.email)return d;
-if(d.role==="mandiadmin"&&(DB.mandis||[]).find(function(m){return m.id===d.mandiId;}))return d;
+if(d.role==="mandiadmin"&&!(d.fromSA)&&(DB.mandis||[]).find(function(m){return m.id===d.mandiId;}))return d;
 if(d.role==="employee"){var mid=d.mandiId;var md=DB.mandiData&&DB.mandiData[mid];if(md&&(md.employees||[]).find(function(e){return e.id===d.empId&&e.active;}))return d;}
 if(d.role==="supervisor"&&(DB.supervisors||[]).find(function(s2){return s2.id===d.supervisorId&&s2.active;}))return d;}}catch(e){}return null;})();
 var maTab=SESSION?( SESSION.lastTab||"writer" ):"writer";
@@ -462,7 +538,238 @@ function exportAllMandiLedgerCSV(){
   else toast("No ledger data found","warn");
 }
 
-// ── RENDER ROOT ──
+// ── MULTI-DEVICE SYNC ──────────────────────────────────────────
+// Uses localStorage + BroadcastChannel for same-browser tabs.
+// For cross-device: user pastes a Firebase URL (only works when
+// the file is served over http/https, not file://).
+// The sync button always shows the right option for the context.
+var SYNC_FB_URL_KEY = "ct_fb_url_v4";
+var SYNC_TIMER = null;
+var SYNC_LAST_TS = 0;
+var BC = (typeof BroadcastChannel !== "undefined") ? new BroadcastChannel("ct_sync") : null;
+
+// ── BroadcastChannel: instant sync between tabs on same browser ──
+if(BC){
+  BC.onmessage = function(ev){
+    if(ev.data && ev.data.type === "db_update"){
+      try{
+        var remote = migrateDB(JSON.parse(ev.data.payload));
+        DB = remote;
+        updateTopbarStats();
+        if(maTab==="boxkeeper"||maTab==="writer"||maTab==="ledger") renderBody();
+      }catch(e){}
+    }
+  };
+}
+
+function getFbUrl(){
+  var u = localStorage.getItem(SYNC_FB_URL_KEY)||"";
+  return u.replace(/\/+$/,"");
+}
+function saveFbUrl(u){ localStorage.setItem(SYNC_FB_URL_KEY,(u||"").replace(/\/+$/,"")); }
+function isFileProtocol(){ return window.location.protocol === "file:"; }
+
+// Broadcast to other tabs on same browser (always works)
+function broadcastDB(){
+  if(BC){ try{ BC.postMessage({type:"db_update", payload:JSON.stringify(DB)}); }catch(e){} }
+}
+
+// Patch saveDB once — broadcast + firebase push
+var _origSaveDB = saveDB;
+saveDB = function(){
+  _origSaveDB();
+  broadcastDB();
+  if(getFbUrl() && !isFileProtocol()) setTimeout(pushToCloud, 400);
+};
+saveDB.__orig = _origSaveDB;
+
+// ── Firebase push/pull (only works over http/https) ──
+async function pushToCloud(){
+  var url = getFbUrl(); if(!url || isFileProtocol()) return;
+  try{
+    await fetch(url+"/cratetrack.json",{
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({db:DB,ts:Date.now()})
+    });
+  }catch(e){}
+}
+
+async function pullFromCloud(){
+  var url = getFbUrl(); if(!url || isFileProtocol()) return false;
+  try{
+    var resp = await fetch(url+"/cratetrack.json",{cache:"no-store"});
+    if(!resp.ok) return false;
+    var data = await resp.json();
+    if(!data||!data.db||!data.db.superAdmin) return false;
+    if(data.ts && data.ts <= SYNC_LAST_TS) return false;
+    SYNC_LAST_TS = data.ts||Date.now();
+    var r = migrateDB(data.db);
+    // Merge: keep whichever side has more records per mandi
+    var mids = Array.from(new Set(
+      Object.keys(DB.mandiData||{}).concat(Object.keys(r.mandiData||{}))
+    ));
+    mids.forEach(function(mid){
+      var L=(DB.mandiData||{})[mid], R=(r.mandiData||{})[mid];
+      if(!R||!L) return;
+      if((L.txns||[]).length     > (R.txns||[]).length)      R.txns     =L.txns;
+      if((L.vehicles||[]).length > (R.vehicles||[]).length)  R.vehicles =L.vehicles;
+      if((L.people||[]).length   > (R.people||[]).length)    R.people   =L.people;
+      if((L.employees||[]).length> (R.employees||[]).length) R.employees=L.employees;
+    });
+    DB = r;
+    try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+    return true;
+  }catch(e){ return false; }
+}
+
+function startCloudSync(){
+  stopCloudSync();
+  if(!getFbUrl()||isFileProtocol()) return;
+  pullFromCloud();
+  SYNC_TIMER = setInterval(async function(){
+    var changed = await pullFromCloud();
+    if(changed){
+      updateTopbarStats();
+      if(maTab==="boxkeeper"||maTab==="writer"||maTab==="ledger") renderBody();
+    }
+  },5000);
+}
+function stopCloudSync(){if(SYNC_TIMER){clearInterval(SYNC_TIMER);SYNC_TIMER=null;}}
+
+// ── SYNC SETUP MODAL ──────────────────────────────────────────
+function showCloudSyncSetup(onDone){
+  var con = mk("div");
+
+  // ── Active Firebase ──
+  if(getFbUrl() && !isFileProtocol()){
+    var okb = mk("div","info-box"); okb.style.marginBottom="12px";
+    okb.innerHTML = "<strong>&#9729;&#65039; Cloud Sync Active</strong><br>All devices sharing the same Firebase URL sync every 5 seconds.";
+    con.appendChild(okb);
+    var dbx = mk("div","dkbox");
+    ap(dbx,mk("div",null,{color:"#94A3B8",fontSize:"10px",fontWeight:"700",marginBottom:"6px"})).textContent="FIREBASE URL — paste this on every device";
+    var uv = mk("div",null,{fontFamily:"monospace",fontSize:"11px",color:"#86EFAC",wordBreak:"break-all",lineHeight:"1.7"});
+    uv.textContent = getFbUrl(); dbx.appendChild(uv); con.appendChild(dbx);
+    var acts = mk("div","fxw"); acts.style.marginTop="12px";
+    acts.appendChild(Btn("Copy URL","btn bp",function(){cpText(getFbUrl());toast("URL copied!");}));
+    acts.appendChild(Btn("Pull Now","btn bt",async function(){
+      var ok=await pullFromCloud();
+      if(ok){closeModals();render();toast("Synced!");}else toast("No new data","warn");
+    }));
+    acts.appendChild(Btn("Push Now","btn bg",async function(){await pushToCloud();toast("Pushed!");}));
+    con.appendChild(acts);
+    var dis=Btn("Disable Sync","btn bgh full",function(){
+      saveFbUrl("");stopCloudSync();closeModals();render();toast("Sync disabled","warn");
+    });
+    dis.style.marginTop="14px"; con.appendChild(dis);
+    openModal("&#9729;&#65039; Cloud Sync",con,false);
+    return;
+  }
+
+  // ── file:// or no Firebase URL: show the two options ──
+  // Option A: Python local server (works RIGHT NOW on same WiFi)
+  var secA = mk("div","card");
+  secA.style.cssText = "border:2px solid "+T.green+";margin-bottom:14px";
+  var ah = mk("div",null,{fontWeight:"800",fontSize:"14px",color:T.green,marginBottom:"6px"});
+  ah.textContent = "Option A — Local WiFi Server (Works RIGHT NOW, No Internet)";
+  secA.appendChild(ah);
+  var ai = mk("div","info-box"); ai.style.marginBottom="10px";
+  ai.innerHTML = "Run ONE command on your PC. Every phone/tablet on the same WiFi sees the same live data. <strong>Best for mandi use — all staff are in the same building.</strong>";
+  secA.appendChild(ai);
+
+  var steps_a = [
+    "Step 1: Open Command Prompt (Windows) or Terminal (Mac) on your PC",
+    "Step 2: Type exactly:",
+    "cd Desktop",
+    "python -m http.server 8000",
+    "Step 3: Find your PC's IP address:",
+    "  Windows: open Command Prompt, type:  ipconfig",
+    "  Look for IPv4 Address — e.g. 192.168.1.5",
+    "Step 4: On every phone/tablet — open browser and go to:",
+    "  http://192.168.1.5:8000/CrateTrack_Pro_Final.html",
+    "  (replace 192.168.1.5 with your actual PC IP)",
+    "Step 5: All devices now share the same file. Done."
+  ];
+  var abox = mk("div","dkbox");
+  steps_a.forEach(function(s){
+    var sl = mk("div",null,{
+      color: s.startsWith("Step") ? "#FCD34D" : "#86EFAC",
+      fontFamily: (s.startsWith("cd ")||s.startsWith("python")||s.startsWith("  http")) ? "monospace" : "inherit",
+      fontSize:"12px",marginBottom:"5px",lineHeight:"1.6"
+    });
+    sl.textContent = s; abox.appendChild(sl);
+  });
+  secA.appendChild(abox);
+  con.appendChild(secA);
+
+  // Option B: GitHub Pages + Firebase (permanent, works from anywhere)
+  var secB = mk("div","card");
+  secB.style.cssText = "border:2px solid "+T.primary+";margin-bottom:14px";
+  var bh = mk("div",null,{fontWeight:"800",fontSize:"14px",color:T.primary,marginBottom:"6px"});
+  bh.textContent = "Option B — GitHub Pages + Firebase (Permanent, Works Anywhere)";
+  secB.appendChild(bh);
+  var bi = mk("div","info-box"); bi.style.marginBottom="10px";
+  bi.innerHTML = "Host the file on GitHub Pages (free). Then enable Firebase sync. Works from <strong>any network anywhere</strong> — home, office, mobile data.";
+  secB.appendChild(bi);
+
+  var steps_b = [
+    "1. github.com \u2192 Sign up free \u2192 New repository named 'cratetrack' \u2192 Create",
+    "2. Upload CrateTrack_Pro_Final.html \u2192 rename it to index.html",
+    "3. Settings \u2192 Pages \u2192 Source: main branch \u2192 Save",
+    "4. Your app URL: https://YOURUSERNAME.github.io/cratetrack/",
+    "5. Open that URL on all devices. Then use the Sync button to set up Firebase.",
+    "6. Firebase setup: console.firebase.google.com \u2192 New project \u2192 Realtime Database",
+    "   \u2192 Create Database \u2192 Test Mode \u2192 Rules tab \u2192 set .read:true .write:true \u2192 Publish",
+    "7. Copy Firebase URL \u2192 paste in Sync button on all devices. Done."
+  ];
+  var bbox = mk("div","dkbox");
+  steps_b.forEach(function(s){
+    var sl = mk("div",null,{color:"#CBD5E1",fontSize:"11px",marginBottom:"5px",lineHeight:"1.6"});
+    sl.textContent = s; bbox.appendChild(sl);
+  });
+  secB.appendChild(bbox);
+  con.appendChild(secB);
+
+  // If served over http but no Firebase URL yet
+  if(!isFileProtocol()){
+    var secC = mk("div","card"); secC.style.border="1px solid "+T.border;
+    var ch = mk("div",null,{fontWeight:"700",fontSize:"13px",marginBottom:"8px"});
+    ch.textContent = "You're hosted \u2714 \u2014 Paste your Firebase URL to enable cross-device sync";
+    secC.appendChild(ch);
+    var fbUrl = "";
+    var errEl = mk("div","err-box"); errEl.style.display="none";
+    var inp = Inp("https://yourproject-default-rtdb.firebaseio.com","",function(v){
+      fbUrl=v.trim(); errEl.style.display="none";
+    });
+    secC.appendChild(Fld("FIREBASE DATABASE URL",inp));
+    secC.appendChild(errEl);
+    secC.appendChild(Btn("Enable Firebase Sync","btn bg full",async function(){
+      var url = fbUrl.replace(/\/+$/,"").trim();
+      if(!url||!url.includes("firebase")){
+        errEl.textContent="Enter your Firebase Realtime Database URL"; errEl.style.display="block"; return;
+      }
+      try{
+        var r = await fetch(url+"/cratetrack.json",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({db:DB,ts:Date.now()})});
+        if(r.status===401||r.status===403){
+          errEl.innerHTML="Permission denied \u2014 go to Firebase \u2192 Rules tab \u2192 set .read:true .write:true \u2192 Publish";
+          errEl.style.display="block"; return;
+        }
+        if(!r.ok){errEl.textContent="Error "+r.status+" \u2014 check URL"; errEl.style.display="block"; return;}
+        saveFbUrl(url); startCloudSync(); closeModals();
+        if(onDone) onDone();
+        setTimeout(function(){showCloudSyncSetup(null);},300);
+        toast("Cloud sync enabled!");
+      }catch(e){
+        errEl.textContent="Failed: "+e.message; errEl.style.display="block";
+      }
+    }));
+    con.appendChild(secC);
+  }
+
+  openModal("&#9729;&#65039; Multi-Device Sync",con,true);
+}
+
+
 function render(){
   stopPolling();
   // Reload DB from storage to pick up changes from other tabs on same device
@@ -637,7 +944,10 @@ function buildSA(){
   var page=mk("div","page");
   var tb=mk("div","topbar");
   var tL=mk("div","fx");var logo=mk("div",null,{background:T.orange,width:"34px",height:"34px",borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"17px",flexShrink:"0"});logo.textContent="📦";var lt=mk("div");var lt1=mk("div",null,{fontWeight:"800",fontSize:"14px"});lt1.textContent="CrateTrack — SUPER ADMIN";var lt2=mk("div",null,{color:"#6B7A99",fontSize:"10px"});lt2.textContent="Platform Control · Yuvisoft";ap(lt,lt1,lt2);ap(tL,logo,lt);
-  var tR=mk("div","fx");ap(tR,Btn("📱 New Device Setup","btn bt sm",function(){showNewDeviceSetup();}),Btn("⬇ Backup","btn bgh sm",function(){exportDBJSON();}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();saTab="overview";render();}));
+  var tR=mk("div","fx");// Show cloud sync status indicator
+var syncActive=!!getFbUrl();
+var syncBtn=Btn(syncActive?"☁️ Synced":"☁️ Sync","btn "+(syncActive?"bg":"bor")+" sm",function(){showCloudSyncSetup(function(){render();});});
+ap(tR,syncBtn,Btn("📱 New Device Setup","btn bt sm",function(){showNewDeviceSetup();}),Btn("⬇ Backup","btn bgh sm",function(){exportDBJSON();}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();saTab="overview";stopCloudSync();render();}));
   ap(tb,tL,tR);page.appendChild(tb);
   var tabBar=mk("div","tab-bar");var body=mk("div","bw");
   function setTab(k){saTab=k;tabBar.querySelectorAll(".tbtn").forEach(function(b){b.classList.toggle("on",b.dataset.k===k);});body.innerHTML="";if(saTab==="overview")renderOv();else if(saTab==="mandis")renderMandis();else if(saTab==="supervisors")renderSupervisors();else if(saTab==="revenue")renderRev();else renderBackup();}
@@ -653,7 +963,14 @@ function buildSA(){
   function buildMandiForm(){var isEdit=mfMode==="edit";var w=mk("div","card");w.style.cssText="border:2px solid "+T.primary+";margin-bottom:14px";var wt=mk("div",null,{fontWeight:"800",fontSize:"14px",marginBottom:"14px",color:T.primary});wt.textContent=isEdit?"✏️ Edit Mandi":"＋ Create New Mandi";w.appendChild(wt);var g=mk("div","g2");[["MANDI NAME *","name","text"],["OWNER *","owner","text"],["CITY","city","text"],["STATE","state","text"],["PHONE","phone","text"],["MAX EMPLOYEES","maxEmp","number"]].forEach(function(item){g.appendChild(Fld(item[0],Inp(item[0],mf[item[1]],function(k){return function(v){mf[k]=v;};}(item[1]),item[2])));});g.appendChild(Fld("PLAN",Sel(mf.plan,[["Starter","Starter — ₹999/mo"],["Professional","Professional — ₹2,499/mo"],["Enterprise","Enterprise — ₹5,999/mo"]],function(v){mf.plan=v;})));g.appendChild(Fld("STATUS",Sel(mf.status,[["active","Active"],["trial","Trial"],["suspended","Suspended"]],function(v){mf.status=v;})));w.appendChild(g);var db=mk("div","dkbox");var eI=Inp("admin@mandi.com",mf.adminEmail,function(v){mf.adminEmail=v;},"email");eI.style.cssText+="background:#1E293B;border-color:#334155;color:#F8FAFC";var pI=Inp("Min 6 chars",mf.adminPw,function(v){mf.adminPw=v;},"text");pI.style.cssText+="background:#1E293B;border-color:#334155;color:#F8FAFC;font-family:monospace";var cg=mk("div","g2");ap(cg,Fld("ADMIN EMAIL *",eI),Fld("ADMIN PASSWORD *",pI));var dt=mk("div",null,{color:"#94A3B8",fontSize:"11px",fontWeight:"700",marginBottom:"8px"});dt.textContent="🔑 ADMIN CREDENTIALS";ap(db,dt,cg);w.appendChild(db);
     function saveFn(){if(!mf.name.trim()||!mf.owner.trim()){toast("Name & Owner required","err");return;}if(!mf.adminEmail.trim()||!mf.adminPw.trim()){toast("Admin credentials required","err");return;}if(mf.adminPw.length<6){toast("Password ≥ 6 chars","err");return;}var em=mf.adminEmail.trim().toLowerCase();if(isEdit){DB.mandis=DB.mandis.map(function(m){return m.id===mfEdit.id?Object.assign({},m,mf,{adminEmail:em,maxEmp:parseInt(mf.maxEmp)||1}):m;});}else{var id="M"+uid();DB.mandis=DB.mandis||[];DB.mandis.push(Object.assign({},mf,{id:id,adminEmail:em,maxEmp:parseInt(mf.maxEmp)||1}));DB.mandiData=DB.mandiData||{};DB.mandiData[id]={people:[],employees:[],vehicles:[],txns:[]};}saveDB();mfMode=null;mfEdit=null;renderMandis();toast(isEdit?"Updated!":"Mandi created!");}
     var acts=mk("div","fx");acts.style.marginTop="12px";ap(acts,Btn(isEdit?"Save Changes":"Create Mandi","btn bp",saveFn),Btn("Cancel","btn bgh",function(){mfMode=null;mfEdit=null;renderMandis();}));w.appendChild(acts);return w;}
-  function buildMandiCard(m){var c=mk("div","card");var top=mk("div","fxb");top.style.marginBottom="12px";var info=mk("div");ap(info,mk("div",null,{fontWeight:"800",fontSize:"15px"})).textContent=m.name;ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=m.city+", "+m.state+" · "+m.owner+" · "+m.phone;var acts=mk("div","fxw");ap(acts,Bdg(m.plan,m.plan==="Enterprise"?T.teal:T.primary),Btn("Open →","btn bp sm",function(mm){return function(){openMandiSA(mm);};}(m)),Btn("🖨 Header","btn bt sm",function(mm){return function(){showHeaderEditor(mm.id,function(){});};}(m)),Btn("✏️ Edit","btn bgh sm",function(mm){return function(){mfMode="edit";mfEdit=mm;mf=Object.assign({},mm,{maxEmp:String(mm.maxEmp||10)});renderMandis();};}(m)),Btn(m.status==="suspended"?"Activate":"Suspend","btn bgh sm",function(mm){return function(){DB.mandis=DB.mandis.map(function(x){return x.id===mm.id?Object.assign({},x,{status:x.status==="suspended"?"active":"suspended"}):x;});saveDB();renderMandis();};}(m)));ap(top,info,acts);c.appendChild(top);return c;}
+  function buildMandiCard(m){var c=mk("div","card");var top=mk("div","fxb");top.style.marginBottom="12px";var info=mk("div");ap(info,mk("div",null,{fontWeight:"800",fontSize:"15px"})).textContent=m.name;ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=m.city+", "+m.state+" · "+m.owner+" · "+m.phone;var acts=mk("div","fxw");ap(acts,Bdg(m.plan,m.plan==="Enterprise"?T.teal:T.primary),Btn("Open →","btn bp sm",function(mm){return function(){openMandiSA(mm);};}(m)),Btn("🖨 Header","btn bt sm",function(mm){return function(){showHeaderEditor(mm.id,function(){});};}(m)),Btn("✏️ Edit","btn bgh sm",function(mm){return function(){mfMode="edit";mfEdit=mm;mf=Object.assign({},mm,{maxEmp:String(mm.maxEmp||10)});renderMandis();};}(m)),Btn(m.status==="suspended"?"Activate":"Suspend","btn bgh sm",function(mm){return function(){DB.mandis=DB.mandis.map(function(x){return x.id===mm.id?Object.assign({},x,{status:x.status==="suspended"?"active":"suspended"}):x;});saveDB();renderMandis();};}(m)));ap(top,info,acts);c.appendChild(top);
+    // Credentials box
+    var cbox=mk("div",null,{background:"#1A2332",borderRadius:"8px",padding:"10px 12px",marginTop:"8px"});
+    var cl=mk("div",null,{color:"#94A3B8",fontSize:"10px",fontWeight:"700",letterSpacing:".06em",marginBottom:"6px"});cl.textContent="🔑 ADMIN CREDENTIALS";cbox.appendChild(cl);
+    var cr1=mk("div","crow");var cv1=mk("div","cval");cv1.style.color="#93C5FD";cv1.textContent=m.adminEmail||"—";var cb1l=mk("div",null,{fontSize:"9px",color:"#94A3B8",marginBottom:"2px"});cb1l.textContent="EMAIL";var cb1=mk("div");ap(cb1,cb1l,cv1);ap(cr1,cb1,Btn("COPY","btn bgh sm",function(v){return function(){cpText(v);};}(m.adminEmail||"")));cbox.appendChild(cr1);
+    var cr2=mk("div","crow");cr2.style.marginTop="4px";var cv2=mk("div","cval");cv2.style.color="#FCD34D";cv2.textContent=m.adminPw||"—";var cb2l=mk("div",null,{fontSize:"9px",color:"#94A3B8",marginBottom:"2px"});cb2l.textContent="PASSWORD";var cb2=mk("div");ap(cb2,cb2l,cv2);ap(cr2,cb2,Btn("COPY","btn bgh sm",function(v){return function(){cpText(v);};}(m.adminPw||"")));cbox.appendChild(cr2);
+    c.appendChild(cbox);
+    return c;}
 
   function renderSupervisors(){body.innerHTML="";if(!DB.supervisors)DB.supervisors=[];var hdr=mk("div","fxb");hdr.style.marginBottom="14px";ap(hdr,mk("div",null,{fontWeight:"800",fontSize:"17px"})).textContent="SA Supervisors";hdr.appendChild(Btn("+ Add Supervisor","btn bpu",function(){showAddSupervisor();}));body.appendChild(hdr);if(!DB.supervisors.length){var ne=mk("div","card");ne.textContent="No supervisors yet.";body.appendChild(ne);return;}DB.supervisors.forEach(function(sv){var c=mk("div","card");var top=mk("div","fxb");var info=mk("div");ap(info,mk("div",null,{fontWeight:"700",fontSize:"14px"})).textContent=sv.name;ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=sv.email+" · "+sv.phone;var acts=mk("div","fx");ap(acts,Bdg(sv.active?"Active":"Inactive",sv.active?T.green:T.muted),Btn("✏️ Edit","btn bgh sm",function(s){return function(){showAddSupervisor(s);};}(sv)),Btn(sv.active?"Deactivate":"Activate","btn bgh sm",function(s){return function(){DB.supervisors=DB.supervisors.map(function(x){return x.id===s.id?Object.assign({},x,{active:!x.active}):x;});saveDB();renderSupervisors();};}(sv)));ap(top,info,acts);c.appendChild(top);body.appendChild(c);});}
   function showAddSupervisor(edit){var sv=edit?Object.assign({},edit,{assignedMandis:(edit.assignedMandis||[]).slice()}):{id:"SV"+uid(),name:"",email:"",pw:"",phone:"",active:true,assignedMandis:[]};var con=mk("div");con.appendChild(Fld("FULL NAME *",Inp("Name",sv.name,function(v){sv.name=v;})));con.appendChild(Fld("EMAIL *",Inp("sup@cratetrack.in",sv.email,function(v){sv.email=v;},"email")));con.appendChild(Fld("PASSWORD *",Inp("Min 6 chars",sv.pw,function(v){sv.pw=v;},"text")));con.appendChild(Fld("PHONE",Inp("9876543210",sv.phone,function(v){sv.phone=v;},"tel")));var mc=mk("div",null,{background:T.bg,borderRadius:"8px",padding:"12px",marginBottom:"10px"});ap(mc,mk("div","lbl")).textContent="ASSIGNED MANDIS";(DB.mandis||[]).forEach(function(m){var row=mk("div","fx");row.style.marginBottom="4px";var cb=document.createElement("input");cb.type="checkbox";cb.checked=(sv.assignedMandis||[]).indexOf(m.id)>=0;cb.onchange=function(){if(cb.checked){if(sv.assignedMandis.indexOf(m.id)<0)sv.assignedMandis.push(m.id);}else{sv.assignedMandis=sv.assignedMandis.filter(function(x){return x!==m.id;});}};var lbl=mk("label",null,{fontSize:"13px",cursor:"pointer",marginLeft:"6px"});lbl.textContent=m.name;ap(row,cb,lbl);mc.appendChild(row);});con.appendChild(mc);con.appendChild(Btn(edit?"Save Changes":"Add Supervisor","btn bp full",function(){if(!sv.name.trim()||!sv.email.trim()||!sv.pw.trim()){toast("Name, email, password required","err");return;}if(!DB.supervisors)DB.supervisors=[];if(edit){DB.supervisors=DB.supervisors.map(function(x){return x.id===sv.id?sv:x;});}else DB.supervisors.push(sv);saveDB();closeModals();renderSupervisors();toast("Saved!");}));openModal((edit?"Edit":"Add")+" Supervisor",con,false);}
@@ -666,14 +983,16 @@ function buildSA(){
     var exh=mk("div",null,{fontWeight:"700",fontSize:"14px",marginBottom:"8px"});exh.textContent="📊 Export All Mandis — Excel / CSV";excard.appendChild(exh);
     var exib=mk("div","info-box");exib.style.marginBottom="12px";exib.innerHTML="Exports one CSV file per mandi containing all transactions for today (6am–6pm window). Each file is named by mandi. Click once to download all.";excard.appendChild(exib);
     var exBtns=mk("div","fxw");
-    exBtns.appendChild(Btn("📊 Export Today (6am–6pm) — All Mandis","btn bg",function(){exportAllMandiCSV("today");}));
-    exBtns.appendChild(Btn("📊 Export Full History — All Mandis","btn bt",function(){exportAllMandiCSV("all");}));
-    exBtns.appendChild(Btn("📊 Export Ledger — All Mandis","btn bpu",function(){exportAllMandiLedgerCSV();}));
+    exBtns.appendChild(Btn("📊 Export Today — All Mandis (CSV)","btn bg",function(){exportAllMandiBackup("today");}));
+    exBtns.appendChild(Btn("📊 Export Full History — All Mandis (CSV)","btn bt",function(){exportAllMandiBackup("all");}));
+    exBtns.appendChild(Btn("📊 Export Ledger — All Mandis (CSV)","btn bpu",function(){exportAllMandiBackup("ledger");}));
     excard.appendChild(exBtns);body.appendChild(excard);
     var bc=mk("div","card");var ib=mk("div","info-box");ib.style.marginBottom="12px";ib.innerHTML="Auto-backup runs at 10 PM. For multi-device sync: Export → transfer → Import on other device.<br><strong>Last backup:</strong> "+(localStorage.getItem("ct_last_backup")||"Never");bc.appendChild(ib);ap(bc,Btn("⬇ Download Full JSON Backup","btn bg",function(){exportDBJSON();}),mk("div",null,{display:"inline-block",width:"10px"}),Btn("⏰ Run Daily Backup Now","btn bor",function(){runDailyBackup(true);}));body.appendChild(bc);var rc=mk("div","card");var ri=mk("div","warn-box");ri.style.marginBottom="12px";ri.textContent="⚠️ Restoring will overwrite ALL current data.";rc.appendChild(ri);var fi=document.createElement("input");fi.type="file";fi.accept=".json";fi.style.display="none";fi.onchange=function(e){var f=e.target.files[0];if(!f)return;importDBJSON(f,function(ok){if(ok){render();toast("Backup restored!");}else toast("Invalid file","err");});};rc.appendChild(fi);rc.appendChild(Btn("📂 Upload Backup File","btn bpu",function(){fi.click();}));body.appendChild(rc);}
 
-  function openMandiSA(m){SESSION={role:"mandiadmin",mandiId:m.id,mandiName:m.name,maxEmp:m.maxEmp,fromSA:true};maTab="writer";render();}
-  setTab(saTab);return page;
+  function openMandiSA(m){SESSION={role:"mandiadmin",mandiId:m.id,mandiName:m.name,maxEmp:m.maxEmp,fromSA:true};maTab="writer";// Do NOT save this transient session to localStorage - SA navigating into mandi
+// saveSession() intentionally NOT called here so refresh goes back to SA screen
+render();}
+  setTab(saTab);startCloudSync();return page;
 }
 
 // ── SUPERVISOR PANEL ──
@@ -682,7 +1001,8 @@ function buildSupervisorPanel(){
   var body=mk("div","bw");body.appendChild(mk("div",null,{fontWeight:"800",fontSize:"17px",marginBottom:"14px"})).textContent="Assigned Mandis";
   var mandis=(SESSION.assignedMandis||[]).map(function(mid){return (DB.mandis||[]).find(function(m){return m.id===mid;});}).filter(Boolean);
   if(!mandis.length)body.appendChild(mk("div","card")).textContent="No mandis assigned.";
-  mandis.forEach(function(m){var c=mk("div","card");var top=mk("div","fxb");ap(top,mk("div",null,{fontWeight:"700",fontSize:"14px"})).textContent=m.name;ap(top,Btn("Open Mandi →","btn bp sm",function(mm){return function(){SESSION=Object.assign({},SESSION,{role:"mandiadmin",mandiId:mm.id,mandiName:mm.name,maxEmp:mm.maxEmp,fromSupervisor:true});maTab="writer";render();};}(m)));c.appendChild(top);body.appendChild(c);});
+  mandis.forEach(function(m){var c=mk("div","card");var top=mk("div","fxb");ap(top,mk("div",null,{fontWeight:"700",fontSize:"14px"})).textContent=m.name;ap(top,Btn("Open Mandi →","btn bp sm",function(mm){return function(){SESSION=Object.assign({},SESSION,{role:"mandiadmin",mandiId:mm.id,mandiName:mm.name,maxEmp:mm.maxEmp,fromSupervisor:true});maTab="writer";// Do NOT save transient supervisor->mandi session
+render();};}(m)));c.appendChild(top);body.appendChild(c);});
   page.appendChild(body);return page;
 }
 
@@ -730,7 +1050,7 @@ function buildMandi(){
   var sovEl=mk("div",null,{color:T.red,fontWeight:"800",fontSize:"13px"});sovEl.id="_stat_out";sovEl.textContent=String(st.tOut);
   var si=mk("div",null,{textAlign:"center"});ap(si,sivEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="IN today";statsDiv.appendChild(si);
   var so=mk("div",null,{textAlign:"center"});ap(so,sovEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="OUT today";statsDiv.appendChild(so);
-  ap(tR,statsDiv,Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();maTab="writer";render();}));
+  ap(tR,statsDiv,Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();maTab="writer";stopCloudSync();render();}));
   ap(tb,tL,tR);page.appendChild(tb);
 
   var allTabs=[["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],["ledger","⚖️ Ledger"],["history","📋 History"],["dayrep","📊 Day Report"],["lotreg","🗂️ Lot Register"]];
@@ -897,13 +1217,10 @@ var n=sendMsgs(regularPpl,MD.txns||[],mandi.name,"—",true);
 var transporters=allPpl.filter(function(p){return p.type==="transporter"&&p.phone;});
 var tCount=0;
 transporters.forEach(function(pp2,tidx){
-  var tVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===pp2.id;});
-  var farmerMap={};
-  tVehicles.forEach(function(v){(v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){if(!farmerMap[l.personId])farmerMap[l.personId]={name:l.personName,qty:0,vehicleNo:v.vehicleNo};});});
-  var farmersWithBal=[];
-  Object.keys(farmerMap).forEach(function(pid){var fb=getBal(MD.txns||[],pid);if(fb.balance>0)farmersWithBal.push({name:farmerMap[pid].name,qty:fb.balance,vehicleNo:farmerMap[pid].vehicleNo});});
+  var tBal2=getTransporterBal(MD.txns||[],MD.vehicles||[],pp2.id);
+  var farmersWithBal=tBal2.farmers;
   if(!farmersWithBal.length)return;
-  var tTotal=farmersWithBal.reduce(function(s,f){return s+f.qty;},0);
+  var tTotal=tBal2.balance;
   tCount++;
   var delay=(n+tidx)*900;
   setTimeout(function(){window.open("https://wa.me/91"+pp2.phone+"?text="+encodeURIComponent(buildTransporterWA(pp2.name,mandi.name,farmersWithBal,"—",tTotal)),"_blank");},delay);
@@ -913,9 +1230,13 @@ if(n>0||tCount>0)toast("Opening WA+SMS for "+(n+tCount)+" person(s) (incl. "+tCo
 else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))topRow.appendChild(Btn("📤 Mass Upload","btn bpu",function(){showMassUpload(function(){renderLedger();});}));body.appendChild(topRow);
     var fc=mk("div","card");var fg=mk("div","ga");fg.style.marginBottom="8px";var fType="all",fSearch="",fBal="all";
     fg.appendChild(Fld("TYPE",Sel("all",[["all","All"],["farmer","🌾 Farmers"],["buyer","🏪 Buyers"],["transporter","🚛 Transporters"]],function(v){fType=v;refreshLedger();})));fg.appendChild(Fld("BALANCE",Sel("all",[["all","All"],["pending","Has Balance"],["clear","Clear"]],function(v){fBal=v;refreshLedger();})));fg.appendChild(Fld("SEARCH",Inp("Name / Phone...","",function(v){fSearch=v;refreshLedger();})));
-    var cntEl=mk("div",null,{fontSize:"11px",color:T.muted,marginTop:"6px"});cntEl.textContent="—";var dlRow=mk("div","fxb");dlRow.style.marginTop="8px";dlRow.appendChild(cntEl);dlRow.appendChild(Btn("⬇ Export CSV","btn bp sm",function(){var rows=[];(MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){var b=getBal(MD.txns||[],p.id);rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);});dlCSV(rows,["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"],"ledger-"+today()+".csv");}));ap(fc,fg,dlRow);body.appendChild(fc);var listDiv=mk("div");body.appendChild(listDiv);
+    var cntEl=mk("div",null,{fontSize:"11px",color:T.muted,marginTop:"6px"});cntEl.textContent="—";var dlRow=mk("div","fxb");dlRow.style.marginTop="8px";dlRow.appendChild(cntEl);dlRow.appendChild(Btn("⬇ Export CSV","btn bp sm",function(){var rows=[];(MD.people||[]).filter(function(p){return p.active;}).forEach(function(p){var b=getBal(MD.txns||[],p.id);rows.push([p.name,p.type,p.phone||"",p.address||"",b.totalOut,b.totalIn,b.balance,b.balance>0?"Owes Crates":"Clear"]);});dlCSV(rows.sort(function(a,b){
+  // Sort: transporters first, then by type, then by name
+  if(a[1]!==b[1]){var order={transporter:0,buyer:1,farmer:2};return (order[a[1]]||9)-(order[b[1]]||9);}
+  return String(a[0]).localeCompare(String(b[0]));
+}),["Name","Type","Phone","Address","Total OUT","Total IN","Balance","Status"],"ledger-"+today()+".csv");}));ap(fc,fg,dlRow);body.appendChild(fc);var listDiv=mk("div");body.appendChild(listDiv);
     function refreshLedger(){
-      var people=(MD.people||[]).filter(function(p){return p.active;});if(fType!=="all")people=people.filter(function(p){return p.type===fType;});if(fSearch){var s=fSearch.toLowerCase();people=people.filter(function(p){return p.name.toLowerCase().indexOf(s)>=0||(p.phone||"").indexOf(s)>=0;});}if(fBal==="pending")people=people.filter(function(p){return getBal(MD.txns||[],p.id).balance>0;});if(fBal==="clear")people=people.filter(function(p){return getBal(MD.txns||[],p.id).balance<=0;});
+      var people=(MD.people||[]).filter(function(p){return p.active;});if(fType!=="all")people=people.filter(function(p){return p.type===fType;});if(fSearch){var s=fSearch.toLowerCase();people=people.filter(function(p){return p.name.toLowerCase().indexOf(s)>=0||(p.phone||"").indexOf(s)>=0;});}if(fBal==="pending")people=people.filter(function(p){return (p.type==="transporter"?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id)).balance>0;});if(fBal==="clear")people=people.filter(function(p){return (p.type==="transporter"?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id)).balance<=0;});
       cntEl.textContent="Showing "+people.length+" of "+(MD.people||[]).filter(function(p){return p.active;}).length;listDiv.innerHTML="";
       if(!people.length){listDiv.appendChild(mk("div",null,{textAlign:"center",color:T.muted,padding:"30px"})).textContent="No matching people found";return;}
       ["farmer","buyer","transporter"].forEach(function(type){
@@ -923,7 +1244,7 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
         var shEl=mk("div","sh");shEl.textContent=type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters";listDiv.appendChild(shEl);
         var g=mk("div","ga");
         ppl.forEach(function(p){
-          var b=getBal(MD.txns||[],p.id);var c=mk("div","card",{cursor:"pointer",marginBottom:"0"});
+          var b=(p.type==="transporter")?getTransporterBal(MD.txns||[],MD.vehicles||[],p.id):getBal(MD.txns||[],p.id);var c=mk("div","card",{cursor:"pointer",marginBottom:"0"});
           var top=mk("div","fx");top.style.marginBottom="8px";var av=mk("div",null,{width:"32px",height:"32px",borderRadius:"50%",flexShrink:"0",background:type==="farmer"?"#1E3A5F":type==="buyer"?"#2D1A4F":"#1A3A2A",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:"800",fontSize:"12px"});av.textContent=p.name[0];var info=mk("div",null,{flex:"1"});ap(info,mk("div",null,{fontWeight:"700",fontSize:"12px"})).textContent=p.name;ap(info,mk("div",null,{fontSize:"10px",color:T.muted})).textContent=p.phone||"—";ap(top,av,info);if(b.balance>50)top.appendChild(Bdg("HIGH",T.red));c.appendChild(top);
           var brow=mk("div",null,{display:"flex",justifyContent:"space-around",background:T.bg,borderRadius:"8px",padding:"8px 4px",marginBottom:"8px"});[["OUT",b.totalOut,T.red],["IN",b.totalIn,T.green],["BAL",b.balance,b.balance>50?T.red:b.balance>0?T.gold:T.green]].forEach(function(item){var d=mk("div",null,{textAlign:"center"});ap(d,mk("div",null,{fontWeight:"800",fontSize:item[0]==="BAL"?"20px":"14px",color:item[2]})).textContent=String(item[1]);ap(d,mk("div",null,{fontSize:"8px",color:T.muted,marginTop:"1px"})).textContent=item[0];brow.appendChild(d);});c.appendChild(brow);
           var acts=mk("div","fx");
@@ -931,33 +1252,10 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
             // Transporter: show ALL farmers with pending balance (all-time), WA + SMS
             if(pp2.type==="transporter"){
               // Collect all vehicles ever handled by this transporter
-              var tVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===pp2.id;});
-              // For each farmer that rode with this transporter, compute their all-time pending balance
-              var farmerMap={};
-              tVehicles.forEach(function(v){
-                (v.lots||[]).filter(function(l){return !l.isOther;}).forEach(function(l){
-                  if(!farmerMap[l.personId]){
-                    farmerMap[l.personId]={personId:l.personId,name:l.personName,vehicleNos:[],qty:0};
-                  }
-                  if(farmerMap[l.personId].vehicleNos.indexOf(v.vehicleNo)<0)
-                    farmerMap[l.personId].vehicleNos.push(v.vehicleNo);
-                });
-              });
-              // Compute all-time balance per farmer
-              var farmersWithBal=[];
-              Object.keys(farmerMap).forEach(function(pid){
-                var fb=getBal(MD.txns||[],pid);
-                if(fb.balance>0){
-                  farmersWithBal.push({
-                    personId:pid,
-                    name:farmerMap[pid].name,
-                    qty:fb.balance,
-                    vehicleNo:farmerMap[pid].vehicleNos.slice(-1)[0]||"—"
-                  });
-                }
-              });
-              // Total balance = sum of all farmers' pending crates via this transporter
-              var tTotal=farmersWithBal.reduce(function(s,f){return s+f.qty;},0);
+              // Use getTransporterBal for consistent farmer breakdown
+              var tBal=getTransporterBal(MD.txns||[],MD.vehicles||[],pp2.id);
+              var farmersWithBal=tBal.farmers;
+              var tTotal=tBal.balance;
               if(!pp2.phone){toast("Transporter has no phone number","warn");return;}
               if(!farmersWithBal.length){toast("No pending balances for "+pp2.name+"'s farmers","warn");return;}
               // Send WA
@@ -978,7 +1276,32 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
   }
 
   function showPersonHistory(person){
-    var txns=(MD.txns||[]).filter(function(t){return t.personId===person.id;}).slice().reverse();var b=getBal(MD.txns||[],person.id);var con=mk("div");
+    var isTransporter=person.type==="transporter";
+    var b=isTransporter?getTransporterBal(MD.txns||[],MD.vehicles||[],person.id):getBal(MD.txns||[],person.id);
+    var txns=[];
+    if(isTransporter){
+      // Show all farmers' transactions that rode with this transporter
+      var tVehicles=(MD.vehicles||[]).filter(function(v){return v.transporterId===person.id;});
+      var farmerIds={};tVehicles.forEach(function(v){(v.lots||[]).forEach(function(l){farmerIds[l.personId]=true;});});
+      txns=(MD.txns||[]).filter(function(t){return farmerIds[t.personId];}).slice().reverse();
+    } else {
+      txns=(MD.txns||[]).filter(function(t){return t.personId===person.id;}).slice().reverse();
+    }
+    var con=mk("div");
+    // For transporter: show farmer-wise balance breakdown first
+    if(isTransporter&&b.farmers&&b.farmers.length){
+      var fbc=mk("div",null,{background:"#FFF7ED",border:"1px solid #FCD34D",borderRadius:"10px",padding:"12px",marginBottom:"12px"});
+      var fbh=mk("div",null,{fontWeight:"700",fontSize:"13px",marginBottom:"8px"});fbh.textContent="🚛 Farmer-wise Pending Balance:";fbc.appendChild(fbh);
+      b.farmers.forEach(function(f){
+        var fr=mk("div",null,{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #FDE68A"});
+        var fn2=mk("div",null,{fontSize:"12px"});fn2.textContent="🌾 "+f.name;fr.appendChild(fn2);
+        var fb2=mk("div",null,{fontWeight:"700",color:T.red,fontSize:"12px"});fb2.textContent=f.balance+" crates";fr.appendChild(fb2);fbc.appendChild(fr);
+      });
+      var ftot=mk("div",null,{display:"flex",justifyContent:"space-between",padding:"6px 0",marginTop:"4px"});
+      var ftl=mk("div",null,{fontWeight:"700",fontSize:"13px"});ftl.textContent="Total Pending:";ftot.appendChild(ftl);
+      var ftv=mk("div",null,{fontWeight:"800",fontSize:"15px",color:T.red});ftv.textContent=b.balance+" crates";ftot.appendChild(ftv);fbc.appendChild(ftot);
+      con.appendChild(fbc);
+    }
     var smry=mk("div",null,{background:T.greenLt,border:"1px solid #A7F3D0",borderRadius:"10px",padding:"12px",marginBottom:"12px"});ap(smry,mk("div",null,{fontSize:"11px",color:T.muted,marginBottom:"4px"})).textContent="ALL-TIME BALANCE";var srow=mk("div","fx",{gap:"14px",flexWrap:"wrap"});[["OUT",b.totalOut,T.red],["−","",T.muted],["IN",b.totalIn,T.green],["=","",T.muted],["BAL",b.balance,b.balance>0?T.gold:T.green]].forEach(function(item){var d=mk("div",null,{textAlign:"center"});ap(d,mk("div",null,{fontWeight:"900",fontSize:item[0]==="BAL"?"28px":"18px",color:item[2]})).textContent=String(item[1]);ap(d,mk("div",null,{fontSize:"9px",color:T.muted})).textContent=item[0];srow.appendChild(d);});smry.appendChild(srow);con.appendChild(smry);
     if(!txns.length)con.appendChild(mk("div",null,{textAlign:"center",color:T.muted,padding:"20px"})).textContent="No transactions yet";
     txns.forEach(function(t){var row=mk("div","fx",{padding:"6px 0",borderBottom:"1px solid "+T.border,flexWrap:"wrap"});ap(row,Bdg(t.dir,t.dir==="IN"?T.green:T.red));if(t.isOther)row.appendChild(Bdg("Other",T.gold));var info=mk("span",null,{flex:"1",fontSize:"11px",color:T.muted});info.textContent=fDate(t.date)+" "+t.time+" · "+(t.vehicleNo||"—")+(t.globalLotNo?" [G#"+t.globalLotNo+"]":"");if(t.enteredBy){var aut=mk("div","audit-tag");aut.textContent="By: "+t.enteredBy+" @ "+(t.enteredAt||"");info.appendChild(aut);}if(t.lastEditedBy){var edl=mk("div","edit-log");edl.textContent="✏️ Edited by: "+t.lastEditedBy+" @ "+t.lastEditedAt+" | Was: "+t.prevDir+" "+t.prevQty+" → Now: "+t.dir+" "+t.qty+(t.editNote?" | "+t.editNote:"");info.appendChild(edl);}row.appendChild(info);var qty=mk("span",null,{fontWeight:"800",color:T.orange,whiteSpace:"nowrap"});qty.textContent=String(t.qty)+" crates";row.appendChild(qty);con.appendChild(row);});
@@ -1069,7 +1392,7 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
     ["farmer","buyer","transporter"].forEach(function(type){var ppl=(MD.people||[]).filter(function(p){return p.type===type;});if(!ppl.length)return;body.appendChild(mk("div","sh")).textContent=type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters";ppl.forEach(function(p){var b=getBal(MD.txns||[],p.id);var row=mk("div",null,{background:"#fff",border:"1px solid "+(p.active?T.border:"#FBBFBF"),borderRadius:"8px",padding:"10px 12px",marginBottom:"6px",display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap",opacity:p.active?"1":"0.7"});var info=mk("div",null,{flex:"1"});ap(info,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent=p.name+(p.active?"":" (inactive)");ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=(p.phone||"")+" · "+(p.address||"—");if(type==="transporter"&&p.ratePerCrate>0)ap(info,mk("div",null,{fontSize:"11px",color:T.orange})).textContent="₹"+p.ratePerCrate+"/crate";var bv=mk("div",null,{fontWeight:"800",color:T.orange,fontSize:"13px",textAlign:"center",minWidth:"50px"});bv.textContent=String(b.balance);ap(bv,mk("div",null,{fontSize:"9px",color:T.muted,fontWeight:"400"})).textContent="balance";var acts=mk("div","fx");ap(acts,Btn("✏️ Edit","btn bgh sm",function(p2){return function(){showEditPersonModal(p2,function(){renderAdmin();});};}(p)),Btn(p.active?"Deactivate":"Activate","btn bgh sm",function(p2){return function(){MD.people=MD.people.map(function(x){return x.id===p2.id?Object.assign({},x,{active:!x.active}):x;});saveDB();renderAdmin();};}(p)));ap(row,info,bv,acts);body.appendChild(row);});});
     // Employees
     var ec=mk("div","card");var activeEmp=(MD.employees||[]).filter(function(e){return e.active;}).length;var ehdr=mk("div","fxb");ehdr.style.marginBottom="12px";var et=mk("div");ap(et,mk("div",null,{fontWeight:"700",fontSize:"14px"})).textContent="👤 Employees";ap(et,mk("div",null,{fontSize:"11px",color:activeEmp>=maxEmp?T.red:T.muted})).textContent=activeEmp+" / "+maxEmp+" active";ap(ehdr,et,Btn("+ Add","btn bt sm",function(){if(activeEmp>=maxEmp){toast("Limit "+maxEmp+" reached.","err");return;}showAddEmpModal();}));ec.appendChild(ehdr);
-    (MD.employees||[]).forEach(function(emp){var row=mk("div",null,{display:"flex",alignItems:"center",gap:"10px",padding:"10px 0",borderTop:"1px solid "+T.border,flexWrap:"wrap",opacity:emp.active?"1":"0.6"});var av=mk("div",null,{width:"34px",height:"34px",borderRadius:"50%",background:emp.active?T.primary:"#94A3B8",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:"800",fontSize:"12px",flexShrink:"0"});av.textContent=emp.name[0];var info=mk("div",null,{flex:"1"});ap(info,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent=emp.name;ap(info,mk("div",null,{fontSize:"10px",color:T.muted})).textContent=(emp.phone||"")+" · Roles: "+(emp.roles||["writer"]).join(", ");ap(info,mk("div",null,{fontSize:"10px",color:T.teal,fontFamily:"monospace"})).textContent=emp.loginEmail||"—";var acts=mk("div","fx");var roleBdgs=mk("div","fx");(emp.roles||["writer"]).forEach(function(r){roleBdgs.appendChild(Bdg(r,r==="writer"?T.teal:r==="boxkeeper"?T.green:r==="supervisor"?T.purple:T.primary));});ap(acts,roleBdgs,Bdg(emp.active?"Active":"Inactive",emp.active?T.green:T.muted),Btn("🔑 Reset PW","btn bpu sm",function(e2){return function(){showResetEmpPw(mandiId,e2,function(){renderAdmin();});};}(emp)),Btn("✏️ Edit","btn bgh sm",function(e2){return function(){showEditEmpModal(e2);};}(emp)),Btn(emp.active?"Deactivate":"Activate","btn bgh sm",function(e2){return function(){MD.employees=MD.employees.map(function(x){return x.id===e2.id?Object.assign({},x,{active:!x.active}):x;});saveDB();renderAdmin();};}(emp)));ap(row,av,info,acts);ec.appendChild(row);});body.appendChild(ec);
+    (MD.employees||[]).forEach(function(emp){var row=mk("div",null,{display:"flex",alignItems:"center",gap:"10px",padding:"10px 0",borderTop:"1px solid "+T.border,flexWrap:"wrap",opacity:emp.active?"1":"0.6"});var av=mk("div",null,{width:"34px",height:"34px",borderRadius:"50%",background:emp.active?T.primary:"#94A3B8",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:"800",fontSize:"12px",flexShrink:"0"});av.textContent=emp.name[0];var info=mk("div",null,{flex:"1"});ap(info,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent=emp.name;ap(info,mk("div",null,{fontSize:"10px",color:T.muted})).textContent=(emp.phone||"")+" · Roles: "+(emp.roles||["writer"]).join(", ");var emailEl=mk("div",null,{fontSize:"10px",color:T.teal,fontFamily:"monospace"});emailEl.textContent=(emp.loginEmail||"—")+" · pw: "+(emp.loginPw?"●●●●"+emp.loginPw.slice(-2):"—");ap(info,emailEl);var acts=mk("div","fx");var roleBdgs=mk("div","fx");(emp.roles||["writer"]).forEach(function(r){roleBdgs.appendChild(Bdg(r,r==="writer"?T.teal:r==="boxkeeper"?T.green:r==="supervisor"?T.purple:T.primary));});ap(acts,roleBdgs,Bdg(emp.active?"Active":"Inactive",emp.active?T.green:T.muted),Btn("🔑 Reset PW","btn bpu sm",function(e2){return function(){showResetEmpPw(mandiId,e2,function(){renderAdmin();});};}(emp)),Btn("✏️ Edit","btn bgh sm",function(e2){return function(){showEditEmpModal(e2);};}(emp)),Btn(emp.active?"Deactivate":"Activate","btn bgh sm",function(e2){return function(){MD.employees=MD.employees.map(function(x){return x.id===e2.id?Object.assign({},x,{active:!x.active}):x;});saveDB();renderAdmin();};}(emp)));ap(row,av,info,acts);ec.appendChild(row);});body.appendChild(ec);
   }
 
   function showAddEmpModal(){
@@ -1160,7 +1483,7 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
     else if(maTab==="lotreg")renderLotRegister();
     else if(maTab==="admin")renderAdmin();
   }
-  renderBody();return page;
+  renderBody();startCloudSync();return page;
 }
 
 render();
