@@ -402,10 +402,10 @@ function getSlipHTML(vehicle,mandiId){
   h+='<div class="row b"><span>Total IN:</span><span>'+(vehicle.totalIn||0)+'</span></div>';
   h+='<div class="row"><span>Our Crates:</span><span>'+(vehicle.lots||[]).filter(function(l){return !l.isOther;}).reduce(function(s,l){return s+l.qty;},0)+'</span></div>';
   h+='<div class="row"><span>Other Boxes:</span><span>'+(vehicle.lots||[]).filter(function(l){return l.isOther;}).reduce(function(s,l){return s+l.qty;},0)+'</span></div>';
-  h+='<div class="ds"></div><div class="c b" style="font-size:9px;margin-bottom:3px">LOT SEGREGATION</div>';
-  h+='<table><thead><tr><th>Lot</th><th>Name</th><th>Type</th><th>Box</th><th style="text-align:right">Qty</th></tr></thead><tbody>';
+  h+='<div class="ds"></div><div class="c b" style="font-size:9px;margin-bottom:3px;border:2px solid #333;padding:4px;margin-top:4px">LOT SEGREGATION</div>';
+  h+='<div style="border:2px solid #333;padding:2px"><table style="width:100%;border-collapse:collapse;font-size:10px"><thead><tr><th style="border:1px solid #555;padding:2px 3px;background:#eee">Lot</th><th style="border:1px solid #555;padding:2px 3px;background:#eee">Name</th><th style="border:1px solid #555;padding:2px 3px;background:#eee">Type</th><th style="border:1px solid #555;padding:2px 3px;background:#eee">Box</th><th style="border:1px solid #555;padding:2px 3px;background:#eee;text-align:right">Qty</th></tr></thead><tbody>';
   (vehicle.lots||[]).forEach(function(l){h+='<tr'+(l.isOther?' class="ob"':'')+'><td style="text-align:center">'+(l.globalLotNo||l.lotNo)+'</td><td>'+l.personName+'</td><td>'+(l.personType==="farmer"?"Fmr":"Byr")+'</td><td>'+(l.isOther?"Othr":"Ours")+'</td><td class="r b">'+l.qty+'</td></tr>';});
-  h+='<tr class="tt"><td colspan="5">TOTAL</td><td class="r">'+(vehicle.lots||[]).reduce(function(s,l){return s+l.qty;},0)+'</td></tr></tbody></table>';
+  h+='<tr style="border-top:2px solid #333;font-weight:800;background:#eee"><td colspan="4" style="text-align:right;padding:3px 5px;border:1px solid #555">TOTAL</td><td style="text-align:right;padding:3px 5px;border:1px solid #555;font-weight:900">'+(vehicle.lots||[]).reduce(function(s,l){return s+l.qty;},0)+'</td></tr></tbody></table></div>';
   if(rate>0){h+='<div class="ds"></div><div class="c b" style="font-size:9px">TRANSPORTER CHARGE</div><div class="cb"><div class="cr"><span>Transporter</span><span><b>'+(vehicle.transporterName||"")+'</b></span></div><div class="cr"><span>Crates</span><span>'+(vehicle.totalIn||0)+'</span></div><div class="cr"><span>Rate/Crate</span><span>'+fMoney(rate)+'</span></div><div class="ct"><span>TOTAL CHARGE</span><span>'+fMoney(charge)+'</span></div></div>';}
   if(vehicle.outDone){var outTxns=[];(DB.mandiData[mandiId]||{txns:[]}).txns.filter(function(t){return t.vehicleNo===vehicle.vehicleNo&&t.dir==="OUT";}).forEach(function(t){outTxns.push(t);});if(outTxns.length){h+='<div class="ds"></div><div class="c b" style="font-size:9px;margin-bottom:3px">OUT DETAILS</div><table><thead><tr><th>Lot</th><th>Name</th><th style="text-align:right">OUT</th></tr></thead><tbody>';outTxns.forEach(function(t){h+='<tr><td>'+(t.globalLotNo||t.lotNo||"")+'</td><td>'+t.personName+'</td><td class="r b">'+t.qty+'</td></tr>';});h+='</tbody></table>';}}
   h+='<div class="sr"><div class="sl"><div class="sll">Writer</div></div><div class="sl"><div class="sll">Transporter</div></div><div class="sl"><div class="sll">Supervisor</div></div></div>';
@@ -777,7 +777,6 @@ function showCloudSyncSetup(onDone){
 
 function render(){
   stopPolling();
-  var fresh=loadDB();if(fresh){DB=fresh;}
   var app=document.getElementById("app");app.innerHTML="";
   var pg;
   // First-run: if superAdmin has no credentials AND no Firebase URL set,
