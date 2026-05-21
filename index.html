@@ -283,10 +283,12 @@ function startPolling(mandiId,onUpdate){
     var freshVehicles=saved.mandiData[mandiId].vehicles||[];
     var curKey=freshTxns.length+"|"+freshVehicles.length+"|"+(freshVehicles.filter(function(v){return v.outDone;}).length);
     if(_lastTxnCount[mandiId]!==undefined&&_lastTxnCount[mandiId]!==curKey){
-      // Update DB in memory
-      DB.mandiData[mandiId].txns=freshTxns;
-      DB.mandiData[mandiId].vehicles=freshVehicles;
-      DB.mandiData[mandiId].people=saved.mandiData[mandiId].people||DB.mandiData[mandiId].people;
+      // Replace whole mandiData object so MD proxy picks up changes
+      var savedMD=saved.mandiData[mandiId];
+      // Only update if saved has more data (never reduce)
+      if((savedMD.txns||[]).length>=(DB.mandiData[mandiId].txns||[]).length){
+        DB.mandiData[mandiId]=savedMD;
+      }
       if(onUpdate)onUpdate();
     }
     _lastTxnCount[mandiId]=curKey;
@@ -1085,7 +1087,9 @@ function buildMandi(){
   var mandiId=SESSION.mandiId;
   if(!DB.mandiData)DB.mandiData={};
   if(!DB.mandiData[mandiId])DB.mandiData[mandiId]={people:[],employees:[],vehicles:[],txns:[]};
-  var MD=DB.mandiData[mandiId];
+  // MD as live getter — always reads from DB.mandiData[mandiId]
+  // This prevents stale references when startPolling() updates DB
+  var MD=new Proxy({},{get:function(t,k){return DB.mandiData[mandiId][k];},set:function(t,k,v){DB.mandiData[mandiId][k]=v;return true;}});
   var mandi=(DB.mandis||[]).find(function(m){return m.id===mandiId;})||{name:SESSION.mandiName||"Mandi",maxEmp:10};
   var maxEmp=SESSION.maxEmp||mandi.maxEmp||10;
   var fromSA=SESSION.fromSA||SESSION.fromSupervisor;
