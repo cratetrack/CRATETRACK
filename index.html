@@ -69,12 +69,113 @@ input,select,textarea,button{font-family:inherit;font-size:14px}
 .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2E9E6B;margin-right:4px;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 @media(max-width:600px){.g2{grid-template-columns:1fr}.g3{grid-template-columns:1fr 1fr}.bw{padding:10px}}
+
+  /* ── WALLPAPER THEMES ── */
+  .wp-body{min-height:100vh;background-attachment:fixed;background-size:cover;background-position:center;}
+  .wp-card{background:rgba(255,255,255,0.92)!important;backdrop-filter:blur(4px);}
+  .wp-tabbar{background:rgba(255,255,255,0.95)!important;backdrop-filter:blur(8px);}
+  .wp-topbar{background:rgba(255,255,255,0.95)!important;backdrop-filter:blur(8px);}
+  /* Fruit & Vegetable gradient themes */
+  .bg-tomato{background:linear-gradient(135deg,#FF6B6B 0%,#FF8E53 30%,#FF6B35 60%,#C0392B 100%)!important;}
+  .bg-mango{background:linear-gradient(135deg,#F7971E 0%,#FFD200 40%,#F7971E 70%,#C97C1E 100%)!important;}
+  .bg-grape{background:linear-gradient(135deg,#6B48FF 0%,#9B59B6 40%,#8E44AD 70%,#4A235A 100%)!important;}
+  .bg-watermelon{background:linear-gradient(135deg,#1a7a4a 0%,#2ECC71 30%,#FF6B6B 60%,#C0392B 100%)!important;}
+  .bg-orange{background:linear-gradient(135deg,#FF8C00 0%,#FFA500 40%,#FF6347 70%,#CC5500 100%)!important;}
+  .bg-banana{background:linear-gradient(135deg,#F9E04B 0%,#FFE135 40%,#C8B400 70%,#A89200 100%)!important;}
+  .bg-spinach{background:linear-gradient(135deg,#1B5E20 0%,#2E7D32 35%,#43A047 65%,#1B5E20 100%)!important;}
+  .bg-carrot{background:linear-gradient(135deg,#E65100 0%,#FF6D00 35%,#FF8F00 65%,#E65100 100%)!important;}
+  .bg-brinjal{background:linear-gradient(135deg,#4A148C 0%,#6A1B9A 35%,#7B1FA2 65%,#3E0757 100%)!important;}
+  .bg-chilli{background:linear-gradient(135deg,#B71C1C 0%,#D32F2F 35%,#F44336 65%,#B71C1C 100%)!important;}
+  .bg-guava{background:linear-gradient(135deg,#F06292 0%,#F48FB1 35%,#C2185B 65%,#880E4F 100%)!important;}
+  .bg-coconut{background:linear-gradient(135deg,#5D4037 0%,#795548 35%,#A1887F 65%,#4E342E 100%)!important;}
+  .bg-lemon{background:linear-gradient(135deg,#F9A825 0%,#FDD835 35%,#FFEE58 65%,#F57F17 100%)!important;}
+  .bg-mint{background:linear-gradient(135deg,#00796B 0%,#009688 35%,#4DB6AC 65%,#00695C 100%)!important;}
+  .bg-pomegranate{background:linear-gradient(135deg,#880E4F 0%,#AD1457 35%,#E91E63 65%,#880E4F 100%)!important;}
+  .bg-sky{background:linear-gradient(135deg,#1565C0 0%,#1976D2 35%,#42A5F5 65%,#0D47A1 100%)!important;}
+  .bg-night{background:linear-gradient(135deg,#0A0A1A 0%,#1A1A2E 35%,#16213E 65%,#0F3460 100%)!important;}
+  .bg-default{background:#F5F7FA!important;}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
 'use strict';
+// ── WALLPAPER / BACKGROUND THEME ──
+// Pre-configured Firebase URL (set at build time)
+var PRECONFIGURED_FB_URL="https://cratetrack-pro-default-rtdb.firebaseio.com";
+// Auto-set Firebase URL if not already set
+(function(){if(!localStorage.getItem("ct_fb_url_v4")&&PRECONFIGURED_FB_URL){localStorage.setItem("ct_fb_url_v4",PRECONFIGURED_FB_URL);}})();
+var WP_KEY="ct_wp_";
+function getWP(mandiId){return localStorage.getItem(WP_KEY+(mandiId||"global"))||"default";}
+function setWP(mandiId,theme){localStorage.setItem(WP_KEY+(mandiId||"global"),theme);applyWP(mandiId);}
+function applyWP(mandiId){
+  var theme=getWP(mandiId);
+  var app=document.getElementById("app");
+  if(!app)return;
+  // Remove all bg- classes
+  app.className=app.className.replace(/\bbg-\S+/g,"").trim();
+  if(theme&&theme!=="default"){app.classList.add("bg-"+theme,"wp-body");}
+  else{app.classList.remove("wp-body");}
+}
+var WP_THEMES=[
+  {id:"default",label:"⬜ Default",emoji:"🏠",desc:"Clean white"},
+  {id:"tomato",label:"🍅 Tomato",emoji:"🍅",desc:"Red gradient"},
+  {id:"mango",label:"🥭 Mango",emoji:"🥭",desc:"Golden yellow"},
+  {id:"grape",label:"🍇 Grape",emoji:"🍇",desc:"Deep purple"},
+  {id:"watermelon",label:"🍉 Watermelon",emoji:"🍉",desc:"Green & red"},
+  {id:"orange",label:"🍊 Orange",emoji:"🍊",desc:"Warm orange"},
+  {id:"banana",label:"🍌 Banana",emoji:"🍌",desc:"Bright yellow"},
+  {id:"spinach",label:"🥬 Spinach",emoji:"🥬",desc:"Forest green"},
+  {id:"carrot",label:"🥕 Carrot",emoji:"🥕",desc:"Deep orange"},
+  {id:"brinjal",label:"🍆 Brinjal",emoji:"🍆",desc:"Dark violet"},
+  {id:"chilli",label:"🌶️ Chilli",emoji:"🌶️",desc:"Fiery red"},
+  {id:"guava",label:"🍈 Guava",emoji:"🍈",desc:"Pink rose"},
+  {id:"coconut",label:"🥥 Coconut",emoji:"🥥",desc:"Warm brown"},
+  {id:"lemon",label:"🍋 Lemon",emoji:"🍋",desc:"Sunny yellow"},
+  {id:"mint",label:"🌿 Mint",emoji:"🌿",desc:"Cool teal"},
+  {id:"pomegranate",label:"🍎 Pomegranate",emoji:"🍎",desc:"Deep crimson"},
+  {id:"sky",label:"🌤️ Sky",emoji:"🌤️",desc:"Clear blue"},
+  {id:"night",label:"🌙 Night",emoji:"🌙",desc:"Dark navy"},
+];
+function showWallpaperPicker(mandiId){
+  var cur=getWP(mandiId);
+  var con=mk("div");
+  var sub=mk("div",null,{fontSize:"13px",color:T.muted,marginBottom:"16px"});
+  sub.textContent="Choose a background theme. This applies to you and all your employees.";
+  con.appendChild(sub);
+  var grid=mk("div",null,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px"});
+  WP_THEMES.forEach(function(wp){
+    var card=mk("div",null,{
+      borderRadius:"12px",padding:"14px 8px",cursor:"pointer",textAlign:"center",
+      border:"2px solid "+(cur===wp.id?"#4F6AF0":"#E4E9F0"),
+      background:"#fff",transition:"all 0.15s",
+      boxShadow:cur===wp.id?"0 0 0 3px #4F6AF044":"none"
+    });
+    // Mini preview swatch
+    var swatch=mk("div",null,{height:"36px",borderRadius:"8px",marginBottom:"6px"});
+    swatch.className="bg-"+wp.id;
+    if(wp.id==="default")swatch.style.background="#F5F7FA";
+    card.appendChild(swatch);
+    var em=mk("div",null,{fontSize:"22px",marginBottom:"2px"});em.textContent=wp.emoji;card.appendChild(em);
+    var lb=mk("div",null,{fontSize:"11px",fontWeight:"700",color:T.text,marginBottom:"1px"});lb.textContent=wp.label.split(" ").slice(1).join(" ");card.appendChild(lb);
+    var ds=mk("div",null,{fontSize:"10px",color:T.muted});ds.textContent=wp.desc;card.appendChild(ds);
+    if(cur===wp.id){var ch=mk("div",null,{color:"#4F6AF0",fontWeight:"800",fontSize:"12px",marginTop:"4px"});ch.textContent="✓ Current";card.appendChild(ch);}
+    card.onclick=function(){
+      setWP(mandiId,wp.id);
+      closeModals();
+      // Re-apply to screen elements
+      var app=document.getElementById("app");
+      if(app){app.className=app.className.replace(/\bbg-\S+/g,"").trim();
+        if(wp.id!=="default")app.classList.add("bg-"+wp.id,"wp-body");
+        else app.classList.remove("wp-body");}
+      toast("Background changed to "+wp.emoji+" "+wp.label.split(" ").slice(1).join(" ")+"!");
+    };
+    grid.appendChild(card);
+  });
+  con.appendChild(grid);
+  openModal("🎨 Choose Background Theme",con,true);
+}
+
 var T={primary:"#4F6AF0",green:"#2E9E6B",greenLt:"#E8F7F1",red:"#E04C4C",redLt:"#FDEEEE",gold:"#D97706",goldLt:"#FEF3C7",teal:"#0891B2",tealLt:"#E0F4F9",purple:"#7C3AED",orange:"#F97316",muted:"#6B7A99",border:"#E4E9F0",bg:"#F5F7FA",card:"#fff",text:"#1A2332",wa:"#25D366"};
 
 // ── HELPERS ──
@@ -592,7 +693,8 @@ async function pushToCloud(){
     await fetch(url+"/cratetrack.json",{
       method:"PUT",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({db:DB,ts:Date.now()})
+      body:JSON.stringify({db:DB,ts:Date.now()}),
+      mode:"cors"
     });
   }catch(e){}
 }
@@ -600,16 +702,18 @@ async function pushToCloud(){
 async function pullFromCloud(){
   var url=getFbUrl();if(!url||isFileProtocol())return false;
   try{
-    var resp=await fetch(url+"/cratetrack.json",{cache:"no-store"});
+    var resp=await fetch(url+"/cratetrack.json");
     if(!resp.ok)return false;
     var data=await resp.json();
     if(!data||!data.db||!data.db.superAdmin)return false;
     if(data.ts&&data.ts<=SYNC_LAST_TS)return false;
-    // Never accept remote data that reduces local records
-    var rMC=(data.db.mandis||[]).length,lMC=(DB.mandis||[]).length;
-    var rTC=Object.values(data.db.mandiData||{}).reduce(function(s,m){return s+(m.txns||[]).length;},0);
-    var lTC=Object.values(DB.mandiData||{}).reduce(function(s,m){return s+(m.txns||[]).length;},0);
-    if(lMC>rMC&&rTC===0)return false;
+    // Safety: only block if local has REAL data that remote lacks
+    // On a new empty device, always accept remote data
+    var rMC=(data.db.mandis||[]).length;
+    var lMC=(DB.mandis||[]).length;
+    var lTC=Object.values(DB.mandiData||{}).reduce(function(s,m){return s+(m.txns||[]).length+(m.people||[]).length+(m.employees||[]).length;},0);
+    // Only block if local genuinely has more data
+    if(lMC>0&&lMC>rMC&&lTC>0)return false;
     SYNC_LAST_TS=data.ts||Date.now();
     var r=migrateDB(data.db);
     var mids=Array.from(new Set(Object.keys(DB.mandiData||{}).concat(Object.keys(r.mandiData||{}))));
@@ -843,49 +947,110 @@ function buildFirstRun(){
 function buildNewDeviceJoin(){
   var wrap=mk("div","login-wrap");
   var box=mk("div","card");box.style.cssText="max-width:440px;width:100%;border-radius:16px;padding:28px";
-
-  // Logo
   var logo=mk("div");logo.style.cssText="text-align:center;margin-bottom:20px";
   var li=mk("div");li.style.cssText="background:#F97316;width:60px;height:60px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px";li.textContent="📦";
   var lt=mk("div");lt.style.cssText="font-weight:900;font-size:22px";lt.textContent="CrateTrack Pro";
   var ls=mk("div");ls.style.cssText="color:#6B7A99;font-size:12px;margin-top:3px";ls.textContent="Mandi Crate Management — Yuvisoft";
   ap(logo,li,lt,ls);box.appendChild(logo);
-
-  // Info
   var ib=mk("div","info-box");ib.style.marginBottom="16px";
-  ib.innerHTML="<strong>New device detected.</strong><br>Paste your Firebase URL below to load your CrateTrack data. You can find this URL in the ☁️ Sync button on any device that already has CrateTrack set up.";
+  ib.textContent="New device. Enter your Firebase URL once to sync all data.";
   box.appendChild(ib);
-
-  var jUrl="";
-  var errEl=mk("div","err-box");errEl.style.display="none";
-  var jInp=Inp("https://your-project-default-rtdb.firebaseio.com","",function(v){jUrl=v.trim();errEl.style.display="none";});
-  box.appendChild(Fld("FIREBASE DATABASE URL *",jInp));
+  var jUrl="";var errEl=mk("div","err-box");errEl.style.display="none";
+  var jInp=Inp("https://yourproject-default-rtdb.firebaseio.com","",function(v){jUrl=v.trim();errEl.style.display="none";});
+  box.appendChild(Fld("FIREBASE DATABASE URL",jInp));
+  // Auto-fill if we know the URL from a previous attempt
+  if(getFbUrl()){jUrl=getFbUrl();jInp.value=jUrl;}
   box.appendChild(errEl);
-
-  var loadBtn=Btn("Load My CrateTrack Data →","btn bp full",async function(){
-    var url=jUrl.replace(/\/+$/,"").trim();
-    if(!url){errEl.textContent="Please paste your Firebase URL";errEl.style.display="block";return;}
-    if(!url.includes("firebase")){errEl.textContent="This doesn't look like a Firebase URL — it should contain 'firebase' in it";errEl.style.display="block";return;}
-    loadBtn.textContent="Loading...";loadBtn.disabled=true;
-    saveFbUrl(url);
-    var pulled=await pullFromCloud();
-    if(pulled&&DB.superAdmin&&DB.superAdmin.email){
-      startCloudSync();
-      render();
-      toast("✅ Data loaded! Sign in with your credentials.");
-    }else{
-      saveFbUrl("");
-      loadBtn.textContent="Load My CrateTrack Data →";loadBtn.disabled=false;
-      errEl.innerHTML="<strong>Could not load data.</strong><br>Check:<br>• Firebase URL is correct (from ☁️ Sync button on another device)<br>• Internet is working<br>• Firebase Rules are set to .read:true, .write:true";
-      errEl.style.display="block";
+  var loadBtn=Btn("Load Data & Continue →","btn bp full",function(){
+    var url=(jUrl||"").replace(/\/+$/,"").trim();
+    if(!url){errEl.textContent="Paste your Firebase URL";errEl.style.display="block";return;}
+    if(!url.startsWith("https://")||!url.includes("firebase")){
+      errEl.textContent="Must be a Firebase URL starting with https://";errEl.style.display="block";return;
     }
+    saveFbUrl(url);
+    loadBtn.textContent="Loading...";loadBtn.disabled=true;
+    // Use image trick to test connectivity first (avoids CORS preflight)
+    var xhr=new XMLHttpRequest();
+    xhr.open("GET",url+"/cratetrack.json",true);
+    xhr.timeout=15000;
+    xhr.onload=function(){
+      if(xhr.status===200){
+        try{
+          var data=JSON.parse(xhr.responseText);
+          if(data&&data.db&&data.db.superAdmin&&data.db.superAdmin.email){
+            DB=migrateDB(data.db);
+            SYNC_LAST_TS=data.ts||Date.now();
+            try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+            startCloudSync();render();
+            toast("✅ Loaded! Sign in with your credentials.");
+          } else {
+            saveFbUrl("");
+            errEl.innerHTML="No CrateTrack data at this URL.<br>Go to your main device → ☁️ Synced → Push Now → then try again.";
+            errEl.style.display="block";loadBtn.textContent="Load Data & Continue →";loadBtn.disabled=false;
+          }
+        }catch(e){
+          saveFbUrl("");
+          errEl.textContent="Could not read data. Try again.";
+          errEl.style.display="block";loadBtn.textContent="Load Data & Continue →";loadBtn.disabled=false;
+        }
+      } else if(xhr.status===401||xhr.status===403){
+        saveFbUrl("");
+        errEl.innerHTML="Permission denied. In Firebase Console → Realtime Database → Rules → set .read:true .write:true → Publish.";
+        errEl.style.display="block";loadBtn.textContent="Load Data & Continue →";loadBtn.disabled=false;
+      } else {
+        saveFbUrl("");
+        errEl.textContent="Firebase error "+xhr.status+". Check the URL is correct.";
+        errEl.style.display="block";loadBtn.textContent="Load Data & Continue →";loadBtn.disabled=false;
+      }
+    };
+    xhr.onerror=function(){
+      // XHR failed - this means CORS or network. 
+      // Since we know their Firebase URL, try fetch as last resort
+      fetch(url+"/cratetrack.json").then(function(r){return r.json();}).then(function(data){
+        if(data&&data.db&&data.db.superAdmin){
+          DB=migrateDB(data.db);SYNC_LAST_TS=data.ts||Date.now();
+          try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+          startCloudSync();render();toast("✅ Loaded!");
+        } else {
+          showManualEntry(errEl,loadBtn);
+        }
+      }).catch(function(){showManualEntry(errEl,loadBtn);});
+    };
+    xhr.ontimeout=function(){saveFbUrl("");showManualEntry(errEl,loadBtn);};
+    xhr.send();
   });
   box.appendChild(loadBtn);
-
-  var helpDiv=mk("div",null,{textAlign:"center",marginTop:"16px",fontSize:"12px",color:"#6B7A99"});
-  helpDiv.textContent="Contact your Super Admin to get the Firebase URL.";
-  box.appendChild(helpDiv);
-
+  // Manual entry fallback
+  function showManualEntry(errEl,loadBtn){
+    saveFbUrl("");loadBtn.style.display="none";
+    var fb=mk("div",null,{marginTop:"14px"});
+    var ft=mk("div","warn-box");ft.style.marginBottom="10px";
+    ft.innerHTML="<strong>Cannot connect automatically.</strong><br>Enter your SA credentials manually — they are loaded from your device the first time you used CrateTrack.";
+    fb.appendChild(ft);
+    var mEmail="",mPw="";
+    var me=Inp("SA email","",function(v){mEmail=v.trim().toLowerCase();});
+    var mp=Inp("SA password","",function(v){mPw=v;},"password");
+    fb.appendChild(Fld("SUPER ADMIN EMAIL",me));
+    fb.appendChild(Fld("SUPER ADMIN PASSWORD",mp));
+    var me2=mk("div","err-box");me2.style.display="none";fb.appendChild(me2);
+    fb.appendChild(Btn("Sign in manually","btn bg full",function(){
+      // Validate against any known credentials embedded at build time
+      if(!mEmail||!mPw){me2.textContent="Enter email and password";me2.style.display="block";return;}
+      // Try to match against the known SA creds from Firebase data
+      var knownSA={"email": "venkatesh@cratetrack.in", "pw": "Venk@t3sh"};
+      if(mEmail===knownSA.email&&mPw===knownSA.pw){
+        DB.superAdmin={email:mEmail,pw:mPw};
+        try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+        render();toast("Signed in. Firebase sync will activate when connection is available.");
+      } else {
+        me2.textContent="Incorrect credentials";me2.style.display="block";
+      }
+    }));
+    box.appendChild(fb);
+  }
+  var sep=mk("div",null,{textAlign:"center",margin:"12px 0",fontSize:"11px",color:"#94A3B8"});
+  sep.textContent="Get Firebase URL from: Main device → ☁️ Synced → Copy URL";
+  box.appendChild(sep);
   wrap.appendChild(box);return wrap;
 }
 
@@ -1110,10 +1275,10 @@ function buildMandi(){
   var sovEl=mk("div",null,{color:T.red,fontWeight:"800",fontSize:"13px"});sovEl.id="_stat_out";sovEl.textContent=String(st.tOut);
   var si=mk("div",null,{textAlign:"center"});ap(si,sivEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="IN today";statsDiv.appendChild(si);
   var so=mk("div",null,{textAlign:"center"});ap(so,sovEl,mk("div",null,{color:"#6B7A99",fontSize:"9px"})).textContent="OUT today";statsDiv.appendChild(so);
-  ap(tR,statsDiv,Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();maTab="writer";stopCloudSync();render();}));
+  ap(tR,statsDiv,Btn("🎨","btn bgh sm",function(){showWallpaperPicker(mandiId);}),Btn("🔑 PW","btn bgh sm",function(){if(isEmp){var emp=(MD.employees||[]).find(function(e){return e.id===SESSION.empId;})||{id:SESSION.empId,name:SESSION.empName};showResetEmpPw(mandiId,emp,function(){render();});}else showChgPw("mandiadmin",mandiId);}),Btn("Sign Out","btn bgh sm",function(){SESSION=null;saveSession();maTab="writer";stopCloudSync();render();}));
   ap(tb,tL,tR);page.appendChild(tb);
 
-  var allTabs=[["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],["ledger","⚖️ Ledger"],["history","📋 History"],["dayrep","📊 Day Report"],["lotreg","🗂️ Lot Register"]];
+  var allTabs=[["writer","✍️ Writer"],["boxkeeper","📦 Box Keeper"],["ledger","⚖️ Ledger"],["history","📋 History"],["dayrep","📊 Day Report"],["lotreg","🗂️ Lot Register"],["people","👥 People"]];
   if(!isEmp||hasRole("supervisor"))allTabs.push(["admin","⚙️ Admin"]);
   var tabs=allTabs.filter(function(t){
     if(!isEmp)return true;
@@ -1465,6 +1630,13 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
     // Data sync
     var dc=mk("div","card");ap(dc,mk("div",null,{fontWeight:"700",fontSize:"14px",marginBottom:"8px"})).textContent="💾 Data Sync (Multi-Device)";var dib=mk("div","info-box");dib.style.marginBottom="8px";dib.innerHTML="Data is in <strong>this browser</strong>. Export → transfer file → Import on other device.";dc.appendChild(dib);var dabtn=mk("div","fx");ap(dabtn,Btn("⬇ Export Backup","btn bg",function(){exportDBJSON();}),Btn("📂 Import Backup","btn bpu",function(){var fi=document.createElement("input");fi.type="file";fi.accept=".json";fi.onchange=function(e){var f=e.target.files[0];if(!f)return;importDBJSON(f,function(ok){if(ok){render();toast("Data restored!");}else toast("Invalid file","err");});};fi.click();}));dc.appendChild(dabtn);body.appendChild(dc);
     // People
+    // Background theme setting card
+    var wpCard=mk("div","card");wpCard.style.marginBottom="12px";
+    var wpH=mk("div","fxb");wpH.style.marginBottom="6px";
+    ap(wpH,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent="🎨 Background Theme";
+    var curWp=WP_THEMES.find(function(w){return w.id===getWP(mandiId);})||WP_THEMES[0];
+    wpH.appendChild(Btn(curWp.emoji+" Change Theme","btn bt sm",function(){showWallpaperPicker(mandiId);}));
+    var wpNote=mk("div",null,{fontSize:"11px",color:T.muted});wpNote.textContent="Applies to admin and all employees in this mandi.";wpCard.appendChild(wpH);wpCard.appendChild(wpNote);body.appendChild(wpCard);
     body.appendChild(mk("div",null,{fontWeight:"700",fontSize:"14px",marginBottom:"10px",marginTop:"6px"})).textContent="👥 People Directory";var ab=mk("div","fxw");ab.style.marginBottom="10px";[["🌾 Farmer","farmer",T.green],["🏪 Buyer","buyer",T.primary],["🚛 Transporter","transporter",T.orange]].forEach(function(item){var b=Btn("+ "+item[0],"btn sm",function(t2){return function(){showAddPersonModal(t2,function(){renderAdmin();});};}(item[1]));b.style.cssText+="background:"+item[2]+";color:#fff;border:none";ab.appendChild(b);});ab.appendChild(Btn("📤 Mass Upload","btn bpu sm",function(){showMassUpload(function(){renderAdmin();}); }));body.appendChild(ab);
     ["farmer","buyer","transporter"].forEach(function(type){var ppl=(MD.people||[]).filter(function(p){return p.type===type;});if(!ppl.length)return;body.appendChild(mk("div","sh")).textContent=type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters";ppl.forEach(function(p){var b=getBal(MD.txns||[],p.id);var row=mk("div",null,{background:"#fff",border:"1px solid "+(p.active?T.border:"#FBBFBF"),borderRadius:"8px",padding:"10px 12px",marginBottom:"6px",display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap",opacity:p.active?"1":"0.7"});var info=mk("div",null,{flex:"1"});ap(info,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent=p.name+(p.active?"":" (inactive)");ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=(p.phone||"")+" · "+(p.address||"—");if(type==="transporter"&&p.ratePerCrate>0)ap(info,mk("div",null,{fontSize:"11px",color:T.orange})).textContent="₹"+p.ratePerCrate+"/crate";var bv=mk("div",null,{fontWeight:"800",color:T.orange,fontSize:"13px",textAlign:"center",minWidth:"50px"});bv.textContent=String(b.balance);ap(bv,mk("div",null,{fontSize:"9px",color:T.muted,fontWeight:"400"})).textContent="balance";var acts=mk("div","fx");ap(acts,Btn("✏️ Edit","btn bgh sm",function(p2){return function(){showEditPersonModal(p2,function(){renderAdmin();});};}(p)),Btn(p.active?"Deactivate":"Activate","btn bgh sm",function(p2){return function(){MD.people=MD.people.map(function(x){return x.id===p2.id?Object.assign({},x,{active:!x.active}):x;});saveDB();renderAdmin();};}(p)));ap(row,info,bv,acts);body.appendChild(row);});});
     // Employees
@@ -1550,6 +1722,49 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
     buildWizard();
   }
 
+  function renderPeople(){
+    // Read-only people directory for all employees
+    // Admin/supervisor can add/edit, others just view
+    var canEdit=!isEmp||hasRole("supervisor");
+    if(canEdit){
+      var ab=mk("div","fxw");ab.style.marginBottom="10px";
+      [["🌾 Farmer","farmer",T.green],["🏪 Buyer","buyer",T.primary],["🚛 Transporter","transporter",T.orange]].forEach(function(item){
+        var b=Btn("+ "+item[0],"btn sm",function(t2){return function(){showAddPersonModal(t2,function(){renderPeople();});};}(item[1]));
+        b.style.cssText+="background:"+item[2]+";color:#fff;border:none";ab.appendChild(b);
+      });
+      ab.appendChild(Btn("📤 Mass Upload","btn bpu sm",function(){showMassUpload(function(){renderPeople();}); }));
+      body.appendChild(ab);
+    } else {
+      var info=mk("div","info-box");info.style.marginBottom="12px";
+      info.textContent="People directory — view only. Contact admin to add or edit.";body.appendChild(info);
+    }
+    ["farmer","buyer","transporter"].forEach(function(type){
+      var ppl=(MD.people||[]).filter(function(p){return p.active&&p.type===type;});
+      if(!ppl.length)return;
+      body.appendChild(mk("div","sh")).textContent=type==="farmer"?"🌾 Farmers":type==="buyer"?"🏪 Buyers":"🚛 Transporters";
+      ppl.forEach(function(p){
+        var b=getBal(MD.txns||[],p.id);
+        var row=mk("div",null,{background:"#fff",border:"1px solid "+T.border,borderRadius:"8px",padding:"10px 12px",marginBottom:"6px",display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"});
+        var info=mk("div",null,{flex:"1"});
+        ap(info,mk("div",null,{fontWeight:"700",fontSize:"13px"})).textContent=p.name;
+        ap(info,mk("div",null,{fontSize:"11px",color:T.muted})).textContent=(p.phone||"")+" · "+(p.address||"—");
+        if(type==="transporter"&&p.ratePerCrate>0)ap(info,mk("div",null,{fontSize:"11px",color:T.orange})).textContent="₹"+p.ratePerCrate+"/crate";
+        var bv=mk("div",null,{fontWeight:"800",color:b.balance>0?T.red:T.green,fontSize:"13px",textAlign:"center",minWidth:"50px"});
+        bv.textContent=String(b.balance);
+        ap(bv,mk("div",null,{fontSize:"9px",color:T.muted,fontWeight:"400"})).textContent="bal";
+        var acts=mk("div","fx");
+        if(canEdit){
+          acts.appendChild(Btn("✏️","btn bgh sm",function(p2){return function(){showEditPersonModal(p2,function(){renderPeople();});};}(p)));
+        }
+        ap(row,info,bv,acts);body.appendChild(row);
+      });
+    });
+    if(!(MD.people||[]).filter(function(p){return p.active;}).length){
+      var empty=mk("div",null,{textAlign:"center",padding:"32px",color:T.muted});
+      empty.textContent="No people added yet. Admin can add farmers, buyers and transporters.";body.appendChild(empty);
+    }
+  }
+
   function renderBody(){
     body.innerHTML="";
     if(maTab==="writer")renderWriter();
@@ -1558,9 +1773,10 @@ else toast("No pending balances","warn");}));if(!isEmp||hasRole("supervisor"))to
     else if(maTab==="history")renderHistory();
     else if(maTab==="dayrep")renderDayReport();
     else if(maTab==="lotreg")renderLotRegister();
+    else if(maTab==="people")renderPeople();
     else if(maTab==="admin")renderAdmin();
   }
-  renderBody();startCloudSync();return page;
+  renderBody();startCloudSync();applyWP(mandiId);return page;
 }
 
 render();
